@@ -1,7 +1,7 @@
 # Interstellar Writer - Documentación de Desarrollo
 
-> **Versión:** 1.0.0  
-> **Licencia:** AGPL-3.0  
+> **Versión:** 1.0.0
+> **Licencia:** AGPL-3.0
 > **Autor:** Juan Oliver
 
 ## Resumen del Proyecto
@@ -23,10 +23,10 @@
 
 ### Características Principales
 
-- Gestión de múltiples colecciones de contenido (blog, docs, proyectos)
+- Gestión de múltiples colecciones de contenido (blog, docs, autores, etc.)
 - Edición visual de frontmatter YAML con campos tipados
 - Vista previa en tiempo real de Markdown/MDX
-- Sincronización con GitHub vía Git
+- Sincronización con GitHub
 - Interfaz visual estilo VS Code (tema oscuro/claro)
 
 ---
@@ -187,7 +187,7 @@ Se han identificado los siguientes puntos donde se usan métodos que pueden caus
 Para elevar la robustez a nivel de producción:
 
 1. **Reemplazar `unwrap()` con manejo explícito:**
-
+   
    ```rust
    // Antes (puede causar pánico)
    let name = path.file_name().unwrap().to_string_lossy();
@@ -197,9 +197,8 @@ Para elevar la robustez a nivel de producción:
        .map(|n| n.to_string_lossy().into_owned())
        .unwrap_or_else(|| "unknown".to_string());
    ```
-
 2. **Usar `anyhow` para propagación de errores:**
-
+   
    ```rust
    use anyhow::{Context, Result};
    
@@ -208,9 +207,8 @@ Para elevar la robustez a nivel de producción:
            .context(format!("Error leyendo {}", path.display()))
    }
    ```
-
 3. **Validar entradas antes de operar:**
-
+   
    ```rust
    if let Some(selected) = &self.selected_collection {
        // Operaciones seguras con `selected`
@@ -394,27 +392,24 @@ pub fn parse_content(content: &str) -> ParsedContent {
 1. **Fork** del repositorio en GitHub
 2. **Clonar** tu fork localmente
 3. **Crear rama** para tu feature:
-
+   
    ```bash
    git checkout -b feature/nombre-descriptivo
    ```
-
 4. **Desarrollar** siguiendo las convenciones de código
 5. **Añadir tests** para nueva funcionalidad
 6. **Verificar** que todo compila y los tests pasan:
-
+   
    ```bash
    cargo fmt
    cargo clippy
    cargo test
    ```
-
 7. **Commit** con mensajes descriptivos:
-
+   
    ```bash
    git commit -m "feat: añadir soporte para campo de tipo Select"
    ```
-
 8. **Push** y crear **Pull Request**
 
 ### Convenciones de Commits
@@ -442,3 +437,4 @@ Seguimos [Conventional Commits](https://www.conventionalcommits.org/):
 ---
 
 *Documentación generada para Interstellar Writer v1.0.0*
+
