@@ -1,0 +1,150 @@
+//! Barra de herramientas del editor.
+
+use eframe::egui;
+
+/// Acciones que puede disparar la barra de herramientas.
+#[derive(Default)]
+pub struct ToolbarActions {
+    pub insert_h1: bool,
+    pub insert_h2: bool,
+    pub insert_h3: bool,
+    pub insert_bold: bool,
+    pub insert_italic: bool,
+    pub insert_link: bool,
+    pub insert_color: bool,
+    pub insert_image: bool,
+    pub insert_table: bool,
+    pub insert_code: bool,
+    pub insert_youtube: bool,
+    pub insert_cta: bool,
+    pub insert_notice_note: bool,
+    pub insert_notice_tip: bool,
+    pub insert_notice_info: bool,
+    pub insert_notice_warning: bool,
+    pub insert_notice_danger: bool,
+    pub insert_notice_success: bool,
+    pub convert_to_mdx: bool,
+    pub toggle_preview: bool,
+}
+
+/// Renderiza la barra de herramientas del editor.
+pub fn show_toolbar(
+    ui: &mut egui::Ui,
+    is_md_file: bool,
+    showing_markdown_mode: &mut bool,
+) -> ToolbarActions {
+    let mut actions = ToolbarActions::default();
+    
+    ui.horizontal(|ui| {
+        // Advertencia de archivo .md
+        if is_md_file {
+            ui.label(egui::RichText::new("⚠️ .md").color(egui::Color32::from_rgb(241, 196, 15)).small());
+            if ui.button("Convertir a .mdx").on_hover_text("Necesario para usar componentes Astro").clicked() {
+                actions.convert_to_mdx = true;
+            }
+            ui.separator();
+        }
+
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            
+            // Grupo: Encabezados
+            ui.group(|ui| {
+                let h_style = egui::TextStyle::Heading;
+                if ui.button(egui::RichText::new("H1").text_style(h_style.clone())).clicked() { 
+                    actions.insert_h1 = true; 
+                }
+                if ui.button(egui::RichText::new("H2").text_style(h_style.clone())).clicked() { 
+                    actions.insert_h2 = true; 
+                }
+                if ui.button(egui::RichText::new("H3").text_style(h_style.clone())).clicked() { 
+                    actions.insert_h3 = true; 
+                }
+            });
+
+            // Grupo: Formato básico
+            ui.group(|ui| {
+                if ui.button(egui::RichText::new("B").strong()).on_hover_text("Negrita").clicked() { 
+                    actions.insert_bold = true; 
+                }
+                if ui.button(egui::RichText::new("I").italics()).on_hover_text("Cursiva").clicked() { 
+                    actions.insert_italic = true; 
+                }
+                if ui.button("🔗").on_hover_text("Enlace").clicked() { 
+                    actions.insert_link = true; 
+                }
+                if ui.button("🎨").on_hover_text("Color de texto").clicked() { 
+                    actions.insert_color = true; 
+                }
+                if ui.button("🖼").on_hover_text("Imagen").clicked() { 
+                    actions.insert_image = true; 
+                }
+                if ui.button("📊").on_hover_text("Tabla").clicked() { 
+                    actions.insert_table = true; 
+                }
+            });
+
+            // Grupo: Código y Especiales
+            ui.group(|ui| {
+                if ui.button("</>").on_hover_text("Código").clicked() { 
+                    actions.insert_code = true; 
+                }
+                if ui.button("📺").on_hover_text("YouTube").clicked() { 
+                    actions.insert_youtube = true; 
+                }
+                if ui.button("📢").on_hover_text("Anuncio (CTA)").clicked() {
+                    actions.insert_cta = true;
+                }
+            });
+
+            // Grupo: Avisos (Notice)
+            ui.group(|ui| {
+                let btn_note = egui::Button::new(egui::RichText::new("📝").color(egui::Color32::WHITE))
+                    .fill(egui::Color32::from_rgb(52, 152, 219));
+                if ui.add(btn_note).on_hover_text("Nota").clicked() { 
+                    actions.insert_notice_note = true; 
+                }
+                
+                let btn_tip = egui::Button::new(egui::RichText::new("💡").color(egui::Color32::WHITE))
+                    .fill(egui::Color32::from_rgb(155, 89, 182));
+                if ui.add(btn_tip).on_hover_text("Tip").clicked() { 
+                    actions.insert_notice_tip = true; 
+                }
+                
+                let btn_info = egui::Button::new(egui::RichText::new("\u{2139}").color(egui::Color32::WHITE))
+                    .fill(egui::Color32::from_rgb(52, 152, 219));
+                if ui.add(btn_info).on_hover_text("Info").clicked() { 
+                    actions.insert_notice_info = true; 
+                }
+                
+                let btn_warn = egui::Button::new(egui::RichText::new("\u{26A0}").color(egui::Color32::WHITE))
+                    .fill(egui::Color32::from_rgb(241, 196, 15));
+                if ui.add(btn_warn).on_hover_text("Aviso").clicked() { 
+                    actions.insert_notice_warning = true; 
+                }
+                
+                let btn_danger = egui::Button::new(egui::RichText::new("\u{1F6AB}").color(egui::Color32::WHITE))
+                    .fill(egui::Color32::from_rgb(231, 76, 60));
+                if ui.add(btn_danger).on_hover_text("Peligro").clicked() { 
+                    actions.insert_notice_danger = true; 
+                }
+                
+                let btn_success = egui::Button::new(egui::RichText::new("\u{2714}").color(egui::Color32::WHITE))
+                    .fill(egui::Color32::from_rgb(46, 204, 113));
+                if ui.add(btn_success).on_hover_text("Éxito").clicked() { 
+                    actions.insert_notice_success = true; 
+                }
+            });
+        });
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let mode_text = if *showing_markdown_mode { "📝 Editor" } else { "👁 Markdown" };
+            if ui.selectable_label(*showing_markdown_mode, mode_text).clicked() {
+                *showing_markdown_mode = !*showing_markdown_mode;
+                actions.toggle_preview = true;
+            }
+        });
+    });
+    
+    actions
+}

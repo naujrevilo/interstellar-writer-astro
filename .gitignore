@@ -1,0 +1,73 @@
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# IDEs y editores
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Configuración local de la aplicación
+# (contiene tokens de GitHub y rutas locales)
+.config/
+*.toml.local
+
+# Archivos temporales
+.output.txt
+*.log
+*.tmp
+*.html
+index.html
+script.js
+styles.css
+
+# Archivos de JetBrains
+Annotator.xml
+GrazieInspection.xml
+SpellCheckingInspection.xml
+.descriptions.xml
+shelf/
+workspace.xml
+tasks.xml
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Node (si se usa para tooling)
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+pnpm-lock.yaml
+
+# Archivos de build/distribución
+dist/
+build/
+*.exe
+*.app
+*.dmg
+*.deb
+*.rpm
+
+# Archivos de backup
+*.bak
+*.backup
+*~
