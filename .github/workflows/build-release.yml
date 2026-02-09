@@ -1,0 +1,66 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Se activa cuando subes un tag como v0.1.0
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: interstellar-writer
+            asset_name: interstellar-writer-linux-x86_64
+          - os: windows-latest
+            artifact_name: interstellar-writer.exe
+            asset_name: interstellar-writer-windows-x86_64.exe
+          - os: macos-latest
+            artifact_name: interstellar-writer
+            asset_name: interstellar-writer-macos-intel-x86_64
+          - os: macos-14 # <-- Este es el runner para Apple Silicon (M1/M2/M3)
+            artifact_name: interstellar-writer
+            asset_name: interstellar-writer-macos-arm64-apple-silicon
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-dev libxkbcommon-dev libdbus-1-dev libegl1-mesa-dev libx11-dev
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Prepare Assets (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd target/release
+          powershell Compress-Archive -Path ${{ matrix.artifact_name }} -DestinationPath ../../${{ matrix.asset_name }}.zip
+
+      - name: Prepare Assets (Linux & macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd target/release
+          tar -czf ../../${{ matrix.asset_name }}.tar.gz ${{ matrix.artifact_name }}
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            interstellar-writer-*.zip
+            interstellar-writer-*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
