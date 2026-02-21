@@ -1,6 +1,6 @@
 # Interstellar Writer - Documentación de Desarrollo
 
-> **Versión:** 1.0.0
+> **Versión:** 1.0.5
 > **Licencia:** AGPL-3.0
 > **Autor:** Juan Oliver
 
@@ -436,5 +436,5 @@ Seguimos [Conventional Commits](https://www.conventionalcommits.org/):
 
 ---
 
-*Documentación generada para Interstellar Writer v1.0.0*
+*Documentación actualizada para Interstellar Writer v1.0.5*
 

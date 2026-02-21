@@ -16,17 +16,17 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact_name: interstellar-writer
-            asset_name: interstellar-writer-linux-x86_64
+            artifact_name: interstellar-writer-astro
+            asset_name: interstellar-writer-astro-linux-x86_64
           - os: windows-latest
-            artifact_name: interstellar-writer.exe
-            asset_name: interstellar-writer-windows-x86_64.exe
+            artifact_name: interstellar-writer-astro.exe
+            asset_name: interstellar-writer-astro-windows-x86_64.exe
           - os: macos-latest
-            artifact_name: interstellar-writer
-            asset_name: interstellar-writer-macos-intel-x86_64
-          - os: macos-14 # <-- Este es el runner para Apple Silicon (M1/M2/M3)
-            artifact_name: interstellar-writer
-            asset_name: interstellar-writer-macos-arm64-apple-silicon
+            artifact_name: interstellar-writer-astro
+            asset_name: interstellar-writer-astro-macos-intel-x86_64
+          - os: macos-14 # Runner para Apple Silicon (M1/M2/M3)
+            artifact_name: interstellar-writer-astro
+            asset_name: interstellar-writer-astro-macos-arm64-apple-silicon
 
     steps:
       - name: Checkout code
@@ -60,7 +60,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            interstellar-writer-*.zip
-            interstellar-writer-*.tar.gz
+            interstellar-writer-astro-*.zip
+            interstellar-writer-astro-*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

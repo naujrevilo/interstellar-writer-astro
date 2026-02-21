@@ -1,6 +1,6 @@
 [package]
 name = "interstellar-writer-astro"
-version = "1.0.0"
+version = "1.0.5"
 edition = "2021"
 authors = ["Juan Oliver"]
 license = "AGPL-3.0"
@@ -20,7 +20,7 @@ chrono = "0.4"
 toml = "0.8"
 confy = "0.6"
 anyhow = "1.0"
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
 
 [build-dependencies]
 # Para el icono en Windows si fuera necesario

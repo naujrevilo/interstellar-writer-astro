@@ -57,6 +57,8 @@ pub struct InterstellarApp {
     commonmark_cache: egui_commonmark::CommonMarkCache,
     /// Caché de etiquetas (tags) encontradas en todos los archivos de la colección
     all_tags: Vec<String>,
+    /// Caché de nombres de categorías disponibles (colección `categories`)
+    all_categories: Vec<String>,
     /// Buffer para añadir nuevas etiquetas manualmente
     new_tag_input: String,
     /// Selección actual del texto en el editor (caracteres inicio, fin)
@@ -70,6 +72,194 @@ pub struct InterstellarApp {
 }
 
 impl InterstellarApp {
+    fn load_manual_content() -> String {
+        let raw = include_str!("../DOCS/MANUAL_USUARIO.md");
+        let assets_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/DOCS/assets/");
+        let uri_base = format!("file:///{}", assets_dir.replace('\\', "/"));
+        raw.replace("](assets/", &format!("]({}", uri_base))
+    }
+
+    fn normalize_frontmatter(&mut self) {
+        // labels -> tags (merge y eliminar duplicados)
+        let labels_key = serde_yaml::Value::String("labels".to_string());
+        let tags_key = serde_yaml::Value::String("tags".to_string());
+        if let Some(labels_val) = self.frontmatter.get(&labels_key).cloned() {
+            match labels_val {
+                serde_yaml::Value::Sequence(seq) => {
+                    let mut set = std::collections::BTreeSet::<String>::new();
+                    for v in seq {
+                        if let Some(s) = v.as_str() {
+                            set.insert(s.to_string());
+                        }
+                    }
+                    if let Some(serde_yaml::Value::Sequence(tag_seq)) =
+                        self.frontmatter.get(&tags_key)
+                    {
+                        for v in tag_seq {
+                            if let Some(s) = v.as_str() {
+                                set.insert(s.to_string());
+                            }
+                        }
+                    }
+                    let merged: Vec<serde_yaml::Value> =
+                        set.into_iter().map(serde_yaml::Value::String).collect();
+                    self.frontmatter
+                        .insert(tags_key.clone(), serde_yaml::Value::Sequence(merged));
+                    self.frontmatter.remove(&labels_key);
+                }
+                serde_yaml::Value::String(s) => {
+                    let val = serde_yaml::Value::Sequence(vec![serde_yaml::Value::String(s)]);
+                    self.frontmatter.insert(tags_key.clone(), val);
+                    self.frontmatter.remove(&labels_key);
+                }
+                _ => {
+                    self.frontmatter.remove(&labels_key);
+                }
+            }
+        }
+
+        // category -> categories (merge y dedupe)
+        let category_key = serde_yaml::Value::String("category".to_string());
+        let categories_key = serde_yaml::Value::String("categories".to_string());
+        if let Some(cat_val) = self.frontmatter.get(&category_key).cloned() {
+            let mut set = std::collections::BTreeSet::<String>::new();
+            match cat_val {
+                serde_yaml::Value::String(s) => {
+                    set.insert(s);
+                }
+                serde_yaml::Value::Sequence(seq) => {
+                    for v in seq {
+                        if let Some(s) = v.as_str() {
+                            set.insert(s.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if let Some(serde_yaml::Value::Sequence(seq)) =
+                self.frontmatter.get(&categories_key)
+            {
+                for v in seq {
+                    if let Some(s) = v.as_str() {
+                        set.insert(s.to_string());
+                    }
+                }
+            }
+            if !set.is_empty() {
+                let merged: Vec<serde_yaml::Value> =
+                    set.into_iter().map(serde_yaml::Value::String).collect();
+                self.frontmatter
+                    .insert(categories_key.clone(), serde_yaml::Value::Sequence(merged));
+            }
+            self.frontmatter.remove(&category_key);
+        }
+
+        // Asegurar unicidad en tags y categories si existen
+        for key in &["tags", "categories"] {
+            let k = serde_yaml::Value::String((*key).to_string());
+            if let Some(serde_yaml::Value::Sequence(seq)) = self.frontmatter.get_mut(&k) {
+                let mut set = std::collections::BTreeSet::<String>::new();
+                for v in seq.iter() {
+                    if let Some(s) = v.as_str() {
+                        set.insert(s.to_string());
+                    }
+                }
+                *seq = set
+                    .into_iter()
+                    .map(serde_yaml::Value::String)
+                    .collect::<Vec<_>>();
+            }
+        }
+    }
+
+    fn render_generic_metadata(&mut self, ui: &mut egui::Ui) {
+        let keys: Vec<serde_yaml::Value> = self.frontmatter.keys().cloned().collect();
+        for key in keys {
+            let label = match &key {
+                serde_yaml::Value::String(s) => s.clone(),
+                other => format!("{:?}", other),
+            };
+            ui.label(egui::RichText::new(label).strong());
+            if let Some(value) = self.frontmatter.get_mut(&key) {
+                match value {
+                    serde_yaml::Value::Bool(b) => {
+                        ui.checkbox(b, "");
+                    }
+                    serde_yaml::Value::String(s) => {
+                        ui.add(
+                            egui::TextEdit::multiline(s)
+                                .desired_rows(1)
+                                .min_size(egui::vec2(ui.available_width(), 0.0)),
+                        );
+                    }
+                    serde_yaml::Value::Null => {
+                        let mut s = String::new();
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut s)
+                                    .hint_text(""),
+                            )
+                            .changed()
+                        {
+                            *value = serde_yaml::Value::String(s);
+                        }
+                    }
+                    serde_yaml::Value::Sequence(seq) => {
+                        ui.horizontal_wrapped(|ui| {
+                            let mut to_remove = None;
+                            for (i, val) in seq.iter().enumerate() {
+                                if let Some(text) = val.as_str() {
+                                    let btn = egui::Button::new(
+                                        egui::RichText::new(format!("{} ✖", text))
+                                            .size(12.0)
+                                            .color(egui::Color32::WHITE),
+                                    )
+                                    .fill(egui::Color32::from_rgb(100, 100, 100))
+                                    .rounding(12.0);
+                                    if ui.add(btn).clicked() {
+                                        to_remove = Some(i);
+                                    }
+                                }
+                            }
+                            if let Some(i) = to_remove {
+                                seq.remove(i);
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.text_edit_singleline(&mut self.new_tag_input);
+                            if ui.button("➕").clicked() && !self.new_tag_input.trim().is_empty() {
+                                let new_tag = self.new_tag_input.trim().to_string();
+                                if !seq
+                                    .iter()
+                                    .any(|v| v.as_str() == Some(&new_tag))
+                                {
+                                    seq.push(serde_yaml::Value::String(new_tag));
+                                }
+                                self.new_tag_input.clear();
+                            }
+                        });
+                    }
+                    serde_yaml::Value::Number(n) => {
+                        let mut s = n.to_string();
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut s)
+                                    .hint_text("0"),
+                            )
+                            .changed()
+                        {
+                            if let Ok(parsed) = s.parse::<f64>() {
+                                *value = serde_yaml::Value::Number(parsed.into());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            ui.add_space(4.0);
+        }
+    }
+
     /// Inicializa la aplicación con la configuración cargada y valores por defecto.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Habilitar cargadores de imágenes (PNG, JPG, etc.)
@@ -99,12 +289,12 @@ impl InterstellarApp {
             showing_markdown_mode: false,
             showing_about_dialog: false,
             showing_manual: false,
-            manual_content: std::fs::read_to_string("DOCS/MANUAL_USUARIO.md")
-                .unwrap_or_else(|_| "No se pudo cargar el manual.".to_string()),
+            manual_content: Self::load_manual_content(),
             sync_rx: None,
             toasts: egui_notify::Toasts::default(),
             commonmark_cache: egui_commonmark::CommonMarkCache::default(),
             all_tags: Vec::new(),
+            all_categories: Vec::new(),
             new_tag_input: String::new(),
             selection: None,
             pending_selection: None,
@@ -120,6 +310,7 @@ impl InterstellarApp {
         if let Some(repo_path) = &self.config.repo_path {
             self.collections = files::scan_collections(repo_path, &self.config.content_dir);
         }
+        self.refresh_categories_cache();
     }
 
     /// Escanea los archivos de la colección seleccionada.
@@ -136,6 +327,18 @@ impl InterstellarApp {
         }
     }
 
+    fn refresh_categories_cache(&mut self) {
+        self.all_categories.clear();
+        if let Some(repo_path) = &self.config.repo_path {
+            let categories_name = "categories";
+            let categories_path = repo_path.join(&self.config.content_dir).join(categories_name);
+            if categories_path.exists() {
+                let entries = files::scan_files(repo_path, &self.config.content_dir, categories_name);
+                self.all_categories = entries.into_iter().map(|e| e.title).collect();
+            }
+        }
+    }
+
     /// Carga el contenido de un archivo seleccionado y lo parsea.
     fn load_file(&mut self) {
         let file_name = self.selected_file.clone();
@@ -148,6 +351,7 @@ impl InterstellarApp {
                 self.frontmatter = parsed.frontmatter;
                 self.body = parsed.body;
                 self.ensure_mandatory_fields();
+                self.normalize_frontmatter();
                 self.status_message = format!("Cargado: {}", file);
             }
         }
@@ -158,7 +362,14 @@ impl InterstellarApp {
         if let Some(collection) = &self.selected_collection {
             let now_iso = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S.000Z").to_string();
 
-            if let Some(def) = self.config.collections.iter().find(|c| c.name == *collection) {
+            let def_opt = self
+                .config
+                .collections
+                .iter()
+                .find(|c| c.name == *collection)
+                .or_else(|| self.config.collections.first());
+
+            if let Some(def) = def_opt {
                 for field in &def.fields {
                     let yaml_key = serde_yaml::Value::String(field.name.clone());
                     if !self.frontmatter.contains_key(&yaml_key) {
@@ -590,8 +801,11 @@ impl eframe::App for InterstellarApp {
                 || utils::pick_folder(),
             );
             if should_refresh {
-                self.sync_project_config();
-                self.refresh_collections();
+                if let Some(path) = &self.config.repo_path {
+                    self.set_repo_path(path.clone());
+                } else {
+                    self.refresh_collections();
+                }
             }
         }
 
@@ -663,9 +877,14 @@ impl eframe::App for InterstellarApp {
                         let delete_btn = egui::Button::new(egui::RichText::new("🗑").color(egui::Color32::WHITE))
                             .fill(if is_draft { egui::Color32::from_rgb(192, 57, 43) } else { egui::Color32::from_gray(100) });
                         
-                        let resp = ui.add_enabled(is_draft, delete_btn);
-                        if resp.on_hover_text(if is_draft { "Eliminar este borrador" } else { "No se pueden eliminar archivos publicados" }).clicked() {
-                            self.showing_delete_confirm = true;
+                        let resp = ui.add(delete_btn);
+                        if resp.on_hover_text(if is_draft { "Eliminar este borrador" } else { "Solo se pueden eliminar archivos con draft: true" }).clicked() {
+                            if is_draft {
+                                self.showing_delete_confirm = true;
+                            } else {
+                                self.status_message = "⚠️ Solo se pueden eliminar archivos en estado 'draft: true'".to_string();
+                                self.toasts.warning(&self.status_message);
+                            }
                         }
                     }
                 });
@@ -760,7 +979,8 @@ impl eframe::App for InterstellarApp {
         let selected_file_ref = self.selected_file.clone();
         let coll_def = selected_coll.as_ref()
             .and_then(|c| self.config.collections.iter().find(|def| def.name == *c))
-            .cloned();
+            .cloned()
+            .or_else(|| self.config.collections.first().cloned());
 
         egui::SidePanel::right("right_metadata")
             .resizable(true)
@@ -779,6 +999,10 @@ impl eframe::App for InterstellarApp {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                         if let Some(def) = &coll_def {
+                            if def.fields.is_empty() {
+                                self.render_generic_metadata(ui);
+                                return;
+                            }
                             let cur_coll = selected_coll.clone().unwrap_or_default();
                             let cur_file = selected_file_ref.clone().unwrap_or_default();
                             let content_dir = self.config.content_dir.clone();
@@ -868,27 +1092,65 @@ impl eframe::App for InterstellarApp {
                                                         let mut to_remove = None;
                                                         for (i, val) in seq.iter().enumerate() {
                                                             if let Some(tag) = val.as_str() {
-                                                                let btn = egui::Button::new(egui::RichText::new(format!("{} ✖", tag)).size(12.0).color(egui::Color32::WHITE))
-                                                                    .fill(egui::Color32::from_rgb(0, 122, 204))
-                                                                    .rounding(12.0);
-                                                                if ui.add(btn).clicked() { to_remove = Some(i); }
+                                                                let btn = egui::Button::new(
+                                                                    egui::RichText::new(format!("{} ✖", tag))
+                                                                        .size(12.0)
+                                                                        .color(egui::Color32::WHITE),
+                                                                )
+                                                                .fill(egui::Color32::from_rgb(
+                                                                    0, 122, 204,
+                                                                ))
+                                                                .rounding(12.0);
+                                                                if ui.add(btn).clicked() {
+                                                                    to_remove = Some(i);
+                                                                }
                                                             }
                                                         }
-                                                        if let Some(i) = to_remove { seq.remove(i); }
+                                                        if let Some(i) = to_remove {
+                                                            seq.remove(i);
+                                                        }
                                                     });
-                                                    
-                                                    if let Some(opts) = &field.options {
-                                                        egui::ComboBox::from_id_salt(format!("combo_{}", field.name))
-                                                            .selected_text("Seleccionar categoría...")
-                                                            .show_ui(ui, |ui| {
-                                                                for opt in opts {
-                                                                    if ui.selectable_label(false, opt).clicked() {
-                                                                        if !seq.iter().any(|v| v.as_str() == Some(opt)) {
-                                                                            seq.push(serde_yaml::Value::String(opt.clone()));
-                                                                        }
+
+                                                    let mut opts: Vec<String> = if !self
+                                                        .all_categories
+                                                        .is_empty()
+                                                    {
+                                                        self.all_categories.clone()
+                                                    } else if let Some(o) = &field.options {
+                                                        o.clone()
+                                                    } else {
+                                                        Vec::new()
+                                                    };
+                                                    opts.sort();
+                                                    opts.dedup();
+
+                                                    if !opts.is_empty() {
+                                                        egui::ComboBox::from_id_salt(format!(
+                                                            "combo_{}",
+                                                            field.name
+                                                        ))
+                                                        .selected_text("Seleccionar categoría...")
+                                                        .show_ui(ui, |ui| {
+                                                            for opt in opts {
+                                                                if ui
+                                                                    .selectable_label(
+                                                                        false,
+                                                                        &opt,
+                                                                    )
+                                                                    .clicked()
+                                                                {
+                                                                    if !seq.iter().any(|v| {
+                                                                        v.as_str() == Some(&opt)
+                                                                    }) {
+                                                                        seq.push(
+                                                                            serde_yaml::Value::String(
+                                                                                opt.clone(),
+                                                                            ),
+                                                                        );
                                                                     }
                                                                 }
-                                                            });
+                                                            }
+                                                        });
                                                     }
                                                 }
                                             },
@@ -956,6 +1218,8 @@ impl eframe::App for InterstellarApp {
                                     self.ensure_import("import { Image } from \"astro:assets\";");
                                 }
                             });
+                        } else {
+                            self.render_generic_metadata(ui);
                         }
                     });
                 });

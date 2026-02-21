@@ -1,6 +1,7 @@
 //! Servicio de gestión de archivos y colecciones.
 
 use crate::models::{CollectionDef, FieldType, FileEntry};
+use chrono::TimeZone;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -53,16 +54,20 @@ pub fn scan_files(repo_path: &PathBuf, content_dir: &str, collection: &str) -> V
                         let parts: Vec<&str> = content.splitn(3, "---").collect();
                         if parts.len() >= 2 {
                             if let Ok(fm) = serde_yaml::from_str::<serde_yaml::Mapping>(parts[1]) {
-                                if let Some(t) = fm.get(&serde_yaml::Value::String("title".to_string())).and_then(|v| v.as_str()) {
+                                if let Some(t) = fm.get("title").and_then(|v| v.as_str()) {
                                     title = t.to_string();
                                 }
-                                if let Some(d) = fm.get(&serde_yaml::Value::String("date".to_string())).and_then(|v| v.as_str()) {
-                                    date = d.to_string();
-                                } else if let Some(d) = fm.get(&serde_yaml::Value::String("publishDate".to_string())).and_then(|v| v.as_str()) {
+                                if let Some(d) = fm
+                                    .get("date")
+                                    .and_then(|v| v.as_str())
+                                    .or_else(|| fm.get("publishDate").and_then(|v| v.as_str()))
+                                    .or_else(|| fm.get("pubDate").and_then(|v| v.as_str()))
+                                    .or_else(|| fm.get("updatedDate").and_then(|v| v.as_str()))
+                                {
                                     date = d.to_string();
                                 }
-                                draft = fm.get(&serde_yaml::Value::String("draft".to_string())).and_then(|v| v.as_bool()).unwrap_or(false);
-                                if let Some(img) = fm.get(&serde_yaml::Value::String("image".to_string())).and_then(|v| v.as_str()) {
+                                draft = fm.get("draft").and_then(|v| v.as_bool()).unwrap_or(false);
+                                if let Some(img) = fm.get("image").and_then(|v| v.as_str()) {
                                     image = Some(img.to_string());
                                 }
                             }
@@ -80,7 +85,43 @@ pub fn scan_files(repo_path: &PathBuf, content_dir: &str, collection: &str) -> V
             }
         }
     }
-    entries.sort_by(|a, b| b.date.cmp(&a.date));
+
+    fn parse_date_for_sort(raw: &str) -> Option<chrono::DateTime<chrono::FixedOffset>> {
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw) {
+            return Some(dt);
+        }
+        if let Some(idx) = raw.find("GMT") {
+            let end = (idx + "GMT+0000".len()).min(raw.len());
+            let candidate = &raw[..end];
+            if let Ok(dt) =
+                chrono::DateTime::parse_from_str(candidate, "%a %b %d %Y %H:%M:%S GMT%z")
+            {
+                return Some(dt);
+            }
+        }
+        if let Ok(nd) = chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
+            if let Some(t) = nd.and_hms_opt(0, 0, 0) {
+                return Some(
+                    chrono::FixedOffset::east_opt(0)
+                        .unwrap()
+                        .from_local_datetime(&t)
+                        .single()?,
+                );
+            }
+        }
+        None
+    }
+
+    entries.sort_by(|a, b| {
+        let da = parse_date_for_sort(&a.date);
+        let db = parse_date_for_sort(&b.date);
+        match (da, db) {
+            (Some(da), Some(db)) => db.cmp(&da),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+    });
     entries
 }
 
@@ -88,7 +129,7 @@ pub fn scan_files(repo_path: &PathBuf, content_dir: &str, collection: &str) -> V
 pub fn scan_tags(repo_path: &PathBuf, content_dir: &str, collection: &str) -> Vec<String> {
     let mut tags = HashSet::new();
     let collection_path = repo_path.join(content_dir).join(collection);
-    
+
     if collection_path.exists() {
         for entry in walkdir::WalkDir::new(collection_path).into_iter().flatten() {
             let path = entry.path();
@@ -112,37 +153,58 @@ pub fn scan_tags(repo_path: &PathBuf, content_dir: &str, collection: &str) -> Ve
             }
         }
     }
-    
+
     let mut tags_vec: Vec<String> = tags.into_iter().collect();
     tags_vec.sort();
     tags_vec
 }
 
 /// Lee el contenido de un archivo.
-pub fn read_file(repo_path: &PathBuf, content_dir: &str, collection: &str, file: &str) -> Option<String> {
+pub fn read_file(
+    repo_path: &PathBuf,
+    content_dir: &str,
+    collection: &str,
+    file: &str,
+) -> Option<String> {
     let file_path = repo_path.join(content_dir).join(collection).join(file);
     std::fs::read_to_string(file_path).ok()
 }
 
 /// Guarda el contenido en un archivo.
-pub fn write_file(repo_path: &PathBuf, content_dir: &str, collection: &str, file: &str, content: &str) -> Result<(), std::io::Error> {
+pub fn write_file(
+    repo_path: &PathBuf,
+    content_dir: &str,
+    collection: &str,
+    file: &str,
+    content: &str,
+) -> Result<(), std::io::Error> {
     let file_path = repo_path.join(content_dir).join(collection).join(file);
     std::fs::write(file_path, content)
 }
 
 /// Elimina un archivo del disco.
-pub fn delete_file(repo_path: &PathBuf, content_dir: &str, collection: &str, file: &str) -> Result<(), std::io::Error> {
+pub fn delete_file(
+    repo_path: &PathBuf,
+    content_dir: &str,
+    collection: &str,
+    file: &str,
+) -> Result<(), std::io::Error> {
     let file_path = repo_path.join(content_dir).join(collection).join(file);
     std::fs::remove_file(file_path)
 }
 
 /// Renombra un archivo de .md a .mdx
-pub fn rename_to_mdx(repo_path: &PathBuf, content_dir: &str, collection: &str, file: &str) -> Option<String> {
+pub fn rename_to_mdx(
+    repo_path: &PathBuf,
+    content_dir: &str,
+    collection: &str,
+    file: &str,
+) -> Option<String> {
     if file.ends_with(".md") {
         let old_path = repo_path.join(content_dir).join(collection).join(file);
         let new_file = file.replace(".md", ".mdx");
         let new_path = repo_path.join(content_dir).join(collection).join(&new_file);
-        
+
         if std::fs::rename(old_path, new_path).is_ok() {
             return Some(new_file);
         }
@@ -152,23 +214,23 @@ pub fn rename_to_mdx(repo_path: &PathBuf, content_dir: &str, collection: &str, f
 
 /// Crea un nuevo archivo con contenido inicial basado en la definición de la colección.
 pub fn create_file(
-    repo_path: &PathBuf, 
-    content_dir: &str, 
-    collection: &str, 
+    repo_path: &PathBuf,
+    content_dir: &str,
+    collection: &str,
     filename: &str,
-    collection_def: Option<&CollectionDef>
+    collection_def: Option<&CollectionDef>,
 ) -> Result<String, String> {
     let mut filename = filename.trim().to_string();
-    if filename.is_empty() { 
-        return Err("Nombre de archivo vacío".to_string()); 
+    if filename.is_empty() {
+        return Err("Nombre de archivo vacío".to_string());
     }
-    
+
     if !filename.ends_with(".md") && !filename.ends_with(".mdx") {
         filename.push_str(".md");
     }
-    
+
     let file_path = repo_path.join(content_dir).join(collection).join(&filename);
-    
+
     if file_path.exists() {
         return Err(format!("El archivo {} ya existe", filename));
     }
@@ -178,27 +240,44 @@ pub fn create_file(
         let _ = std::fs::create_dir_all(parent);
     }
 
-    let now_iso = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S.000Z").to_string();
+    let now_iso = chrono::Local::now()
+        .format("%Y-%m-%dT%H:%M:%S.000Z")
+        .to_string();
     let title = filename.replace(".md", "").replace(".mdx", "");
 
     let initial_content = if let Some(def) = collection_def {
         let mut fm = serde_yaml::Mapping::new();
         for field in &def.fields {
             let val = match field.field_type {
-                FieldType::String => serde_yaml::Value::String(if field.name == "title" { title.clone() } else { field.default_value.clone() }),
-                FieldType::Boolean => serde_yaml::Value::Bool(field.default_value.parse().unwrap_or(false)),
-                FieldType::Date => serde_yaml::Value::String(if field.default_value == "now" { now_iso.clone() } else { field.default_value.clone() }),
+                FieldType::String => serde_yaml::Value::String(if field.name == "title" {
+                    title.clone()
+                } else {
+                    field.default_value.clone()
+                }),
+                FieldType::Boolean => {
+                    serde_yaml::Value::Bool(field.default_value.parse().unwrap_or(false))
+                }
+                FieldType::Date => serde_yaml::Value::String(if field.default_value == "now" {
+                    now_iso.clone()
+                } else {
+                    field.default_value.clone()
+                }),
                 FieldType::List => serde_yaml::Value::Sequence(vec![]),
                 FieldType::Categories => serde_yaml::Value::Sequence(vec![]),
                 FieldType::Image => serde_yaml::Value::Null,
-                FieldType::Number => serde_yaml::Value::Number(field.default_value.parse::<f64>().unwrap_or(0.0).into()),
+                FieldType::Number => serde_yaml::Value::Number(
+                    field.default_value.parse::<f64>().unwrap_or(0.0).into(),
+                ),
             };
             fm.insert(serde_yaml::Value::String(field.name.clone()), val);
         }
         let fm_str = serde_yaml::to_string(&fm).unwrap_or_default();
         format!("---\n{}---\n\nEscribe aquí tu contenido...", fm_str)
     } else {
-        format!("---\ntitle: \"{}\"\npublishDate: {}\n---\n\nContenido...", title, now_iso)
+        format!(
+            "---\ntitle: \"{}\"\npublishDate: {}\n---\n\nContenido...",
+            title, now_iso
+        )
     };
 
     std::fs::write(&file_path, initial_content)
@@ -208,14 +287,14 @@ pub fn create_file(
 
 /// Copia una imagen externa al directorio de assets y devuelve su ruta relativa al repo.
 pub fn copy_image_to_assets(
-    repo_path: &PathBuf, 
-    assets_dir: &str, 
-    source_path: &std::path::Path
+    repo_path: &PathBuf,
+    assets_dir: &str,
+    source_path: &std::path::Path,
 ) -> Option<String> {
     let file_name = source_path.file_name()?.to_string_lossy();
     let assets_path = repo_path.join(assets_dir);
     let _ = std::fs::create_dir_all(&assets_path);
-    
+
     let dest_path = assets_path.join(&*file_name);
     if std::fs::copy(source_path, &dest_path).is_ok() {
         Some(format!("{}/{}", assets_dir.replace("\\", "/"), file_name))
