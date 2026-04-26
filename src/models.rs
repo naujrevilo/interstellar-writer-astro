@@ -93,6 +93,12 @@ pub struct Config {
     /// Historial de configuraciones de proyectos abiertos.
     #[serde(default)]
     pub project_configs: Vec<ProjectConfig>,
+    #[serde(default = "default_autosave_secs")]
+    pub autosave_seconds: u64,
+}
+
+fn default_autosave_secs() -> u64 {
+    30
 }
 
 impl Default for Config {
@@ -220,6 +226,7 @@ impl Default for Config {
                 },
             ],
             project_configs: vec![],
+            autosave_seconds: default_autosave_secs(),
         }
     }
 }

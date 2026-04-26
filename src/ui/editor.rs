@@ -8,7 +8,7 @@ pub fn show_editor(
     body: &mut String,
     selection: &mut Option<(usize, usize)>,
     pending_selection: &mut Option<(usize, usize)>,
-) {
+) -> bool {
     let output = ui.add_sized(
         [ui.available_width(), ui.available_height().max(600.0)],
         egui::TextEdit::multiline(body)
@@ -88,4 +88,5 @@ pub fn show_editor(
             *selection = Some((range.primary.index, range.secondary.index));
         }
     }
+    output.changed()
 }

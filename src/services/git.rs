@@ -1,6 +1,5 @@
 //! Servicio de sincronización con Git/GitHub.
 
-use anyhow::Context;
 use std::path::PathBuf;
 
 /// Resultado de la operación de sincronización.

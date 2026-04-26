@@ -1,12 +1,11 @@
 //! Estructura principal de la aplicación Interstellar Writer.
 
 use eframe::egui;
-use rfd::FileDialog;
 use std::path::PathBuf;
 
-use crate::models::{Config, CollectionDef, FieldType, FileEntry, ProjectConfig};
+use crate::models::{Config, FieldType, FileEntry, ProjectConfig};
 use crate::services::{content, files, git};
-use crate::ui::{dialogs, panels, dashboard, toolbar, editor, preview, splash};
+use crate::ui::{dialogs, dashboard, toolbar, editor, preview, splash};
 use crate::utils;
 
 /// Estructura principal de la aplicación que mantiene el estado global.
@@ -69,6 +68,22 @@ pub struct InterstellarApp {
     splash_start_time: Option<std::time::Instant>,
     /// Indica si ya se ha completado la visualización del splash screen
     splash_finished: bool,
+    /// Indica si hay cambios sin guardar
+    is_dirty: bool,
+    /// Modo de escritura enfocada
+    focus_mode: bool,
+    /// Temporizador del último guardado automático (backup)
+    last_autosave: Option<std::time::Instant>,
+    /// Indica si hay un diálogo de recuperación activo
+    showing_recovery_dialog: bool,
+    /// Contenido candidato para recuperación desde backup
+    backup_content_candidate: Option<String>,
+    /// Filtro de búsqueda en el panel de archivos
+    file_filter: String,
+    /// Muestra/oculta la paleta de comandos (Ctrl+K)
+    showing_command_palette: bool,
+    /// Query de búsqueda de la paleta de comandos
+    command_palette_query: String,
 }
 
 impl InterstellarApp {
@@ -300,6 +315,14 @@ impl InterstellarApp {
             pending_selection: None,
             splash_start_time: None,
             splash_finished: false,
+            is_dirty: false,
+            focus_mode: false,
+            last_autosave: None,
+            showing_recovery_dialog: false,
+            backup_content_candidate: None,
+            file_filter: String::new(),
+            showing_command_palette: false,
+            command_palette_query: String::new(),
         };
         app.refresh_collections();
         app
@@ -353,8 +376,10 @@ impl InterstellarApp {
                 self.ensure_mandatory_fields();
                 self.normalize_frontmatter();
                 self.status_message = format!("Cargado: {}", file);
+                self.is_dirty = false;
             }
         }
+        self.check_backup_for_recovery();
     }
 
     /// Asegura que el Frontmatter tenga los campos mínimos requeridos.
@@ -403,6 +428,11 @@ impl InterstellarApp {
                 self.status_message = format!("✅ Guardado: {}", file);
                 self.toasts.success(&self.status_message);
                 self.refresh_tags_cache();
+                self.is_dirty = false;
+                self.last_autosave = None;
+                if let Some(bp) = self.backup_path() {
+                    let _ = std::fs::remove_file(bp);
+                }
             } else {
                 self.status_message = "❌ Error al guardar".to_string();
             }
@@ -525,6 +555,34 @@ impl InterstellarApp {
         self.insert_replacement(text, "");
     }
 
+    fn apply_format(&mut self, prefix: &str, suffix: &str) {
+        self.insert_replacement(prefix, suffix);
+    }
+
+    fn fuzzy_match(query: &str, candidate: &str) -> bool {
+        let q = query.trim().to_lowercase();
+        if q.is_empty() {
+            return true;
+        }
+
+        let c = candidate.to_lowercase();
+        if c.contains(&q) {
+            return true;
+        }
+
+        let mut q_chars = q.chars();
+        let mut next_q = q_chars.next();
+        for ch in c.chars() {
+            if Some(ch) == next_q {
+                next_q = q_chars.next();
+                if next_q.is_none() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Lógica central de inserción con manejo de selección.
     fn insert_replacement(&mut self, before: &str, after: &str) {
         self.showing_markdown_mode = false;
@@ -582,6 +640,7 @@ impl InterstellarApp {
         let new_pos = start_idx + final_before.chars().count() + selected_text.chars().count() + after.chars().count();
         self.selection = Some((new_pos, new_pos));
         self.pending_selection = Some((new_pos, new_pos));
+        self.is_dirty = true;
     }
 
     /// Verifica si un import ya existe y si no, lo añade al principio del cuerpo.
@@ -727,6 +786,46 @@ impl InterstellarApp {
             });
         }
     }
+
+    fn backup_path(&self) -> Option<std::path::PathBuf> {
+        let base = dirs::data_local_dir()?.join("interstellar-writer").join("backups");
+        let col = self.selected_collection.as_deref().unwrap_or("default");
+        let file = self.selected_file.as_deref().unwrap_or("unknown");
+        Some(base.join(col).join(format!("{}.bak", file)))
+    }
+
+    fn save_backup(&self) {
+        let Some(path) = self.backup_path() else { return };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&path, self.body.as_bytes());
+    }
+
+    fn check_backup_for_recovery(&mut self) {
+        let repo = self.config.repo_path.clone();
+        let coll = self.selected_collection.clone();
+        let file = self.selected_file.clone();
+        let content_dir = self.config.content_dir.clone();
+        let bp = match self.backup_path() {
+            Some(p) => p,
+            None => return,
+        };
+        if let (Some(repo), Some(coll), Some(file)) = (repo, coll, file) {
+            let file_path = repo.join(&content_dir).join(&coll).join(&file);
+            if let (Ok(bm), Ok(om)) = (
+                std::fs::metadata(&bp).and_then(|m| m.modified()),
+                std::fs::metadata(&file_path).and_then(|m| m.modified()),
+            ) {
+                if bm > om {
+                    if let Ok(content) = std::fs::read_to_string(&bp) {
+                        self.backup_content_candidate = Some(content);
+                        self.showing_recovery_dialog = true;
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl eframe::App for InterstellarApp {
@@ -762,6 +861,25 @@ impl eframe::App for InterstellarApp {
         self.toasts.show(ctx);
         utils::apply_visuals(ctx, self.config.dark_mode);
 
+        // --- ATAJOS DE TECLADO ---
+        let mut save_now = false;
+        let mut toggle_focus = false;
+        let mut toggle_palette = false;
+        let mut escape_pressed = false;
+        ctx.input(|i| {
+            if i.key_pressed(egui::Key::S) && i.modifiers.ctrl { save_now = true; }
+            if i.key_pressed(egui::Key::F11) { toggle_focus = true; }
+            if i.key_pressed(egui::Key::K) && i.modifiers.ctrl { toggle_palette = true; }
+            if i.key_pressed(egui::Key::Escape) { escape_pressed = true; }
+        });
+        if save_now && self.selected_file.is_some() { self.save_file(); }
+        if toggle_focus { self.focus_mode = !self.focus_mode; }
+        if toggle_palette { self.showing_command_palette = !self.showing_command_palette; }
+        if escape_pressed && self.showing_command_palette {
+            self.showing_command_palette = false;
+            self.command_palette_query.clear();
+        }
+
         // --- DIÁLOGOS ---
         if self.showing_about_dialog {
             dialogs::show_about_dialog(ctx, &mut self.showing_about_dialog);
@@ -769,6 +887,77 @@ impl eframe::App for InterstellarApp {
 
         if self.showing_manual {
             dialogs::show_manual_dialog(ctx, &mut self.showing_manual, &self.manual_content, &mut self.commonmark_cache);
+        }
+
+        if self.showing_recovery_dialog {
+            egui::Window::new("Borrador recuperado").show(ctx, |ui| {
+                ui.label("Existe un borrador más reciente sin guardar. ¿Restaurar?");
+                ui.horizontal(|ui| {
+                    if ui.button("✅ Restaurar borrador").clicked() {
+                        if let Some(c) = self.backup_content_candidate.take() {
+                            self.body = c;
+                            self.is_dirty = true;
+                        }
+                        self.showing_recovery_dialog = false;
+                    }
+                    if ui.button("🗑 Descartar").clicked() {
+                        self.backup_content_candidate = None;
+                        self.showing_recovery_dialog = false;
+                        if let Some(bp) = self.backup_path() { let _ = std::fs::remove_file(bp); }
+                    }
+                });
+            });
+        }
+
+        // --- PALETA DE COMANDOS (Ctrl+K) ---
+        if self.showing_command_palette {
+            let files_snapshot: Vec<_> = self.files.clone();
+            egui::Window::new("🔍 Paleta de comandos")
+                .collapsible(false)
+                .resizable(true)
+                .default_width(520.0)
+                .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 60.0))
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut self.command_palette_query)
+                                .hint_text("Buscar archivo por título o nombre…")
+                                .desired_width(ui.available_width() - 40.0),
+                        );
+                        response.request_focus();
+                        if ui.button("✕").clicked() {
+                            self.showing_command_palette = false;
+                            self.command_palette_query.clear();
+                        }
+                    });
+                    ui.add_space(4.0);
+                    ui.separator();
+                    let query = self.command_palette_query.to_lowercase();
+                    let matches: Vec<_> = files_snapshot.iter()
+                        .filter(|f| {
+                            Self::fuzzy_match(&query, &f.title)
+                                || Self::fuzzy_match(&query, &f.name)
+                        })
+                        .take(12)
+                        .cloned()
+                        .collect();
+                    egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                        let mut to_open: Option<String> = None;
+                        for entry in &matches {
+                            let icon = if entry.draft { "🔒" } else { "✅" };
+                            let row = format!("{} {}  —  {}", icon, entry.title, entry.name);
+                            if ui.selectable_label(false, row).clicked() {
+                                to_open = Some(entry.name.clone());
+                            }
+                        }
+                        if let Some(name) = to_open {
+                            self.selected_file = Some(name);
+                            self.load_file();
+                            self.showing_command_palette = false;
+                            self.command_palette_query.clear();
+                        }
+                    });
+                });
         }
 
         if self.showing_delete_confirm {
@@ -838,7 +1027,27 @@ impl eframe::App for InterstellarApp {
                 
                 if let Some(file) = &self.selected_file {
                     ui.separator();
-                    ui.label(egui::RichText::new(format!("📝 {}", file)).strong().color(egui::Color32::from_rgb(52, 152, 219)));
+                    let dirty_mark = if self.is_dirty { " ●" } else { "" };
+                    // Breadcrumbs para subcarpetas
+                    let parts: Vec<&str> = file.split('/').collect();
+                    if parts.len() > 1 {
+                        for (i, part) in parts.iter().enumerate() {
+                            if i > 0 {
+                                ui.label(egui::RichText::new("›").color(egui::Color32::from_gray(130)));
+                            }
+                            let is_last = i == parts.len() - 1;
+                            let text = if is_last {
+                                egui::RichText::new(format!("{}{}", part, dirty_mark))
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(52, 152, 219))
+                            } else {
+                                egui::RichText::new(*part).color(egui::Color32::from_gray(160))
+                            };
+                            ui.label(text);
+                        }
+                    } else {
+                        ui.label(egui::RichText::new(format!("📝 {}{}", file, dirty_mark)).strong().color(egui::Color32::from_rgb(52, 152, 219)));
+                    }
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -900,6 +1109,12 @@ impl eframe::App for InterstellarApp {
                     if let Some(repo) = &self.config.repo_path {
                         ui.label(format!("Repo: {}", repo.display()));
                     }
+                    if self.selected_file.is_some() {
+                        ui.separator();
+                        let words = self.body.split_whitespace().count();
+                        let mins = (words / 200).max(1);
+                        ui.label(format!("{} palabras · ~{} min", words, mins));
+                    }
                 });
             });
         });
@@ -914,7 +1129,7 @@ impl eframe::App for InterstellarApp {
         egui::SidePanel::left("left_explorer")
             .resizable(true)
             .default_width(250.0)
-            .show_animated(ctx, self.showing_collections || self.showing_files, |ui| {
+            .show_animated(ctx, (self.showing_collections || self.showing_files) && !self.focus_mode, |ui| {
                 if self.showing_collections {
                     ui.horizontal(|ui| {
                         ui.heading("📂 Colecciones");
@@ -932,6 +1147,7 @@ impl eframe::App for InterstellarApp {
                                 should_refresh_tags = true;
                                 self.selected_file = None;
                                 self.content.clear();
+                                self.file_filter.clear();
                             }
                         }
                     });
@@ -948,13 +1164,29 @@ impl eframe::App for InterstellarApp {
                             }
                         });
                     });
+                    // Filtro de búsqueda
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.file_filter)
+                                .hint_text("🔍 Filtrar…")
+                                .desired_width(ui.available_width() - 30.0),
+                        );
+                        if !self.file_filter.is_empty() && ui.button("✕").clicked() {
+                            self.file_filter.clear();
+                        }
+                    });
+                    let filter_lc = self.file_filter.to_lowercase();
+                    let filtered: Vec<_> = files_list.iter()
+                        .filter(|f| {
+                            filter_lc.is_empty()
+                                || f.title.to_lowercase().contains(&filter_lc)
+                                || f.name.to_lowercase().contains(&filter_lc)
+                        })
+                        .collect();
                     egui::ScrollArea::vertical().id_salt("file_scroll").show(ui, |ui| {
-                        for entry in &files_list {
-                            let label = if entry.draft { 
-                                format!("📝 {}", entry.title) 
-                            } else { 
-                                format!("✅ {}", entry.title) 
-                            };
+                        for entry in filtered {
+                            let icon = if entry.draft { "🔒" } else { "✅" };
+                            let label = format!("{} {}", icon, entry.title);
                             if ui.selectable_label(self.selected_file.as_ref() == Some(&entry.name), label).clicked() {
                                 file_to_load = Some(entry.name.clone());
                             }
@@ -985,7 +1217,7 @@ impl eframe::App for InterstellarApp {
         egui::SidePanel::right("right_metadata")
             .resizable(true)
             .default_width(300.0)
-            .show_animated(ctx, self.showing_metadata && self.selected_file.is_some(), |ui| {
+            .show_animated(ctx, self.showing_metadata && self.selected_file.is_some() && !self.focus_mode, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading("📝 Metadatos");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1230,16 +1462,17 @@ impl eframe::App for InterstellarApp {
             if self.selected_file.is_some() {
                 // Barra de herramientas
                 let is_md = self.selected_file.as_ref().map_or(false, |f| f.ends_with(".md"));
-                let actions = toolbar::show_toolbar(ui, is_md, &mut self.showing_markdown_mode);
+                let actions = toolbar::show_toolbar(ui, is_md, &mut self.showing_markdown_mode, self.focus_mode);
                 
                 // Procesar acciones de la toolbar
+                if actions.toggle_focus_mode { self.focus_mode = !self.focus_mode; }
                 if actions.convert_to_mdx { self.rename_to_mdx(); }
                 if actions.insert_h1 { self.insert_at_cursor("\n\n# "); }
                 if actions.insert_h2 { self.insert_at_cursor("\n\n## "); }
                 if actions.insert_h3 { self.insert_at_cursor("\n\n### "); }
-                if actions.insert_bold { self.insert_replacement("**", "**"); }
-                if actions.insert_italic { self.insert_replacement("*", "*"); }
-                if actions.insert_link { self.insert_replacement("[", "](url)"); }
+                if actions.insert_bold { self.apply_format("**", "**"); }
+                if actions.insert_italic { self.apply_format("*", "*"); }
+                if actions.insert_link { self.apply_format("[", "](url)"); }
                 if actions.insert_color { self.insert_replacement("<span style={{color: '#e74c3c'}}>\n", "\n</span>"); }
                 if actions.insert_image { self.handle_image_insertion(); }
                 if actions.insert_table { self.insert_at_cursor("\n\n| Columna 1 | Columna 2 |\n| :--- | :--- |\n| Dato 1 | Dato 2 |\n\n"); }
@@ -1262,13 +1495,15 @@ impl eframe::App for InterstellarApp {
                 ui.separator();
                 
                 egui::ScrollArea::vertical().id_salt("editor_scroll").show(ui, |ui| {
+                    let h_margin = if self.focus_mode { 120.0 } else { 30.0 };
                     egui::Frame::none()
-                        .inner_margin(egui::Margin::symmetric(30.0, 20.0))
+                        .inner_margin(egui::Margin::symmetric(h_margin, 20.0))
                         .show(ui, |ui| {
                             if self.showing_markdown_mode {
                                 preview::render_body_preview(ui, &self.body, &mut self.commonmark_cache);
                             } else {
-                                editor::show_editor(ui, &mut self.body, &mut self.selection, &mut self.pending_selection);
+                                let editor_changed = editor::show_editor(ui, &mut self.body, &mut self.selection, &mut self.pending_selection);
+                                if editor_changed { self.is_dirty = true; }
                             }
                         });
                 });
@@ -1316,9 +1551,23 @@ impl eframe::App for InterstellarApp {
         });
 
         // --- VENTANA FLOTANTE DE VISTA PREVIA ---
-        if self.showing_preview && self.selected_file.is_some() {
+        if self.showing_preview && self.selected_file.is_some() && !self.focus_mode {
             let body = self.body.clone();
             preview::show_preview_window(ctx, &mut self.showing_preview, &body, &mut self.commonmark_cache);
+        }
+
+        // --- AUTOGUARDADO (backup) ---
+        if self.is_dirty && self.selected_file.is_some() {
+            let secs = self.config.autosave_seconds.max(1);
+            let should_save = self
+                .last_autosave
+                .map(|t| t.elapsed().as_secs() >= secs)
+                .unwrap_or(true);
+            if should_save {
+                self.save_backup();
+                self.last_autosave = Some(std::time::Instant::now());
+            }
+            ctx.request_repaint_after(std::time::Duration::from_secs(secs));
         }
     }
 }
