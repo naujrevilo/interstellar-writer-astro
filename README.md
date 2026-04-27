@@ -16,6 +16,7 @@
 - 🔄 **Sincronización con GitHub**: Commit y push directamente desde la app
 - 🎨 **Tema oscuro/claro**: Interfaz inspirada en VS Code
 - 📊 **Dashboard de publicaciones**: Vista de tarjetas estilo CMS
+- 🎛️ **Sistema de diseño base (Fase 1)**: Tokens visuales y componentes reutilizables para consistencia UI
 
 ---
 
@@ -170,6 +171,36 @@ cargo check
 
 - [DEVELOPMENT.md](DOCS/DEVELOPMENT.md) — Documentación técnica y arquitectura
 - [MANUAL_USUARIO.md](DOCS/MANUAL_USUARIO.md) — Guía de usuario
+- [CHANGELOG.md](CHANGELOG.md) — Historial de cambios y versionado
+
+### Estado de roadmap
+
+- ✅ Base de editor/gestión de contenido estable
+- ✅ **Fase 1 completada:** tokens de diseño + componentes base aplicados en toolbar, dashboard, paneles, diálogos, app activa y preview.
+- ⏭️ Próximo hito: **Fase 2** (refactor visual integral de editor/paneles con jerarquía y densidad mejorada)
+
+### To-Do próximas fases
+
+#### Fase 2 — Refinamiento visual y consistencia avanzada
+
+- [ ] Rediseñar jerarquía visual de editor y paneles (espaciado, tipografías y agrupación por contexto).
+- [ ] Homogeneizar estados interactivos (hover, active, selected, disabled) en toda la app.
+- [ ] Mejorar accesibilidad de contraste en dark/light para texto, selección y badges.
+- [ ] Eliminar hardcodeos residuales de color/estilo fuera de `theme.rs` y `components.rs`.
+
+#### Fase 3 — Productividad de edición
+
+- [ ] Completar flujo de atajos de teclado en acciones frecuentes (guardar, preview, foco, comando rápido).
+- [ ] Mejorar navegación entre colección/archivo con feedback contextual y menor fricción.
+- [ ] Fortalecer manejo de borradores y recuperación ante cierre inesperado.
+- [ ] Mejorar indicadores de estado (cambios sin guardar, sync pendiente, errores de validación).
+
+#### Fase 4 — Calidad, distribución y operación
+
+- [ ] Expandir cobertura de pruebas para servicios, parsing de contenido y rutas críticas de UI.
+- [ ] Estandarizar checklist de release (versionado, changelog, artefactos, notas de publicación).
+- [ ] Automatizar validaciones previas a release (lint/check/tests) en CI.
+- [ ] Sincronizar documentación técnica y diagramas con cada corte de versión.
 
 ### Diagramas de Arquitectura
 
@@ -191,6 +222,15 @@ cargo check
 4. Abre un Pull Request hacia `main`
 
 Ver [DEVELOPMENT.md](DOCS/DEVELOPMENT.md) para convenciones de código.
+
+### Política de release por fase
+
+Cada fase aprobada incluye obligatoriamente:
+
+- actualización de documentación (`README`, `DOCS/`),
+- actualización de `CHANGELOG.md`,
+- actualización de versión (SemVer) al momento de corte de release,
+- sincronización de artefactos públicos (GitHub release y landing page).
 
 ---
 

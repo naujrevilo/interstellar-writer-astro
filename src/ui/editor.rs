@@ -17,15 +17,22 @@ pub fn show_editor(
             .layouter(&mut |ui, text, wrap_width| {
                 let mut layout_job = egui::text::LayoutJob::default();
                 layout_job.wrap.max_width = wrap_width;
-                
+
                 let font_id = egui::TextStyle::Monospace.resolve(ui.style());
                 let default_color = ui.visuals().text_color();
-                
+
                 for line in text.lines() {
+                    let dark_mode = ui.visuals().dark_mode;
                     let format = if line.starts_with("#") {
                         egui::TextFormat {
                             font_id: egui::FontId::proportional(font_id.size * 1.1),
-                            color: egui::Color32::from_rgb(86, 156, 214),
+                            // Dark: azul claro brillante visible sobre fondo oscuro y sobre selección.
+                            // Light: azul más saturado para contraste sobre fondo blanco.
+                            color: if dark_mode {
+                                egui::Color32::from_rgb(100, 180, 255)
+                            } else {
+                                egui::Color32::from_rgb(0, 80, 180)
+                            },
                             ..Default::default()
                         }
                     } else if line.starts_with("import") || line.starts_with("---") {
@@ -67,18 +74,21 @@ pub fn show_editor(
                     layout_job.append(line, 0.0, format);
                     layout_job.append("\n", 0.0, egui::TextFormat::default());
                 }
-                
+
                 ui.fonts(|f| f.layout_job(layout_job))
             })
-            .lock_focus(true)
+            .lock_focus(true),
     );
-    
+
     // Si tenemos una selección pendiente (programática), la aplicamos
     if let Some((start, end)) = pending_selection.take() {
-        let mut state = egui::text_edit::TextEditState::load(ui.ctx(), output.id).unwrap_or_default();
+        let mut state =
+            egui::text_edit::TextEditState::load(ui.ctx(), output.id).unwrap_or_default();
         let c_start = egui::text::CCursor::new(start);
         let c_end = egui::text::CCursor::new(end);
-        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(c_start, c_end)));
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::two(c_start, c_end)));
         state.store(ui.ctx(), output.id);
     }
 

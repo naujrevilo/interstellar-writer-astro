@@ -3,7 +3,7 @@ authors = ["Juan Oliver"]
 edition = "2021"
 license = "AGPL-3.0"
 name = "interstellar-writer-astro"
-version = "1.0.5"
+version = "1.1.0"
 
 [dependencies]
 anyhow = "1.0"

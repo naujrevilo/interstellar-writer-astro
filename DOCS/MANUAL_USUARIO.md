@@ -54,6 +54,8 @@ Ubicada en la parte superior, cada icono realiza una función específica:
   - 🛑**Peligro (Rojo)**: Alertas críticas.
   - ✅**Éxito (Verde)**: Confirmaciones positivas.
 
+> Nota (Fase 1): la barra y el dashboard ya usan un sistema base de componentes/tokens para mantener consistencia visual entre acciones, badges y estados.
+
 ### Resaltado de Sintaxis
 
 El editor ahora cuenta con resaltado visual básico:

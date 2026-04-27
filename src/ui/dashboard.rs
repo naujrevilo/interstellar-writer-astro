@@ -1,5 +1,6 @@
 use eframe::egui;
 use crate::models::FileEntry;
+use crate::ui::{components, theme};
 
 /// Resultado de las acciones del dashboard.
 pub enum DashboardAction {
@@ -17,18 +18,16 @@ pub fn show_dashboard(
     files: &[FileEntry],
 ) -> DashboardAction {
     let mut action = DashboardAction::None;
+    let tokens = theme::tokens_from_ui(ui);
 
     ui.vertical(|ui| {
-        ui.add_space(10.0);
+        ui.add_space(tokens.spacing_md);
 
         ui.horizontal(|ui| {
             ui.heading(egui::RichText::new(format!("Dashboard: {}", collection_name)).size(24.0));
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let btn_new = egui::Button::new(egui::RichText::new("➕ Nueva Publicación").color(egui::Color32::WHITE))
-                    .fill(egui::Color32::from_rgb(0, 122, 204))
-                    .rounding(4.0);
-                if ui.add(btn_new).clicked() {
+                if components::primary_button(ui, "➕ Nueva Publicación").clicked() {
                     action = DashboardAction::NewFile;
                 }
                 if ui.button("🔄 Refrescar").clicked() {
@@ -37,9 +36,9 @@ pub fn show_dashboard(
             });
         });
 
-        ui.add_space(10.0);
+        ui.add_space(tokens.spacing_md);
         ui.separator();
-        ui.add_space(10.0);
+        ui.add_space(tokens.spacing_md);
 
         egui::ScrollArea::vertical().id_salt("dashboard_scroll").show(ui, |ui| {
             if files.is_empty() {
@@ -84,6 +83,7 @@ enum CardAction {
 
 fn render_card(ui: &mut egui::Ui, entry: &FileEntry, card_width: f32) -> CardAction {
     let mut action = CardAction::None;
+    let tokens = theme::tokens_from_ui(ui);
 
     ui.group(|ui| {
         ui.set_width(card_width);
@@ -92,13 +92,13 @@ fn render_card(ui: &mut egui::Ui, entry: &FileEntry, card_width: f32) -> CardAct
         ui.vertical(|ui| {
             // Header color/area
             let (header_color, icon) = if entry.draft {
-                (egui::Color32::from_rgb(60, 60, 60), "📝")
+                (tokens.subtle_bg, "📝")
             } else {
-                (egui::Color32::from_rgb(0, 122, 204), "🚀")
+                (tokens.brand_primary, "🚀")
             };
 
             let (rect, _) = ui.allocate_at_least(egui::vec2(card_width, 80.0), egui::Sense::hover());
-            ui.painter().rect_filled(rect, 4.0, header_color);
+            ui.painter().rect_filled(rect, tokens.radius_sm, header_color);
             // Dibujar icono
             ui.painter().text(
                 rect.center(),
@@ -110,20 +110,19 @@ fn render_card(ui: &mut egui::Ui, entry: &FileEntry, card_width: f32) -> CardAct
 
             ui.add_space(5.0);
             ui.label(egui::RichText::new(&entry.title).strong().size(16.0));
-            ui.label(egui::RichText::new(&entry.date).small().color(egui::Color32::GRAY));
+            ui.label(egui::RichText::new(&entry.date).small().color(tokens.text_muted));
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 ui.add_space(5.0);
                 ui.horizontal(|ui| {
                     if entry.draft {
-                        ui.label(egui::RichText::new("BORRADOR").small().strong().color(egui::Color32::from_rgb(241, 196, 15)));
+                        components::status_badge(ui, "BORRADOR", tokens.brand_warning);
                     } else {
-                        ui.label(egui::RichText::new("PUBLICADO").small().strong().color(egui::Color32::from_rgb(46, 204, 113)));
+                        components::status_badge(ui, "PUBLICADO", tokens.brand_success);
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let btn_edit = egui::Button::new("Editar").rounding(4.0);
-                        if ui.add(btn_edit).clicked() {
+                        if components::primary_button(ui, "Editar").clicked() {
                             action = CardAction::Edit;
                         }
                         if entry.draft {

@@ -5,6 +5,8 @@
 pub mod dialogs;
 pub mod editor;
 pub mod dashboard;
+pub mod components;
 pub mod preview;
 pub mod splash;
+pub mod theme;
 pub mod toolbar;

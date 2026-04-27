@@ -2,6 +2,8 @@
 
 use eframe::egui;
 
+use crate::ui::{components, theme};
+
 /// Acciones que puede disparar la barra de herramientas.
 #[derive(Default)]
 pub struct ToolbarActions {
@@ -37,21 +39,48 @@ pub fn show_toolbar(
 ) -> ToolbarActions {
     let mut actions = ToolbarActions::default();
 
-    ui.horizontal(|ui| {
-        // Acciones para archivo .md
-        if is_md_file {
-            if ui
-                .button("Convertir a .mdx")
-                .on_hover_text("Necesario para usar componentes Astro")
-                .clicked()
-            {
-                actions.convert_to_mdx = true;
-            }
-            ui.separator();
-        }
-
+    ui.vertical(|ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
+
+            // Acciones de fila superior: conversión + foco + modo vista
+            if is_md_file {
+                if components::primary_button(ui, "Convertir a .mdx")
+                    .on_hover_text("Necesario para usar componentes Astro")
+                    .clicked()
+                {
+                    actions.convert_to_mdx = true;
+                }
+            }
+
+            let focus_label = if focus_mode {
+                "🔲 Salir Foco"
+            } else {
+                "📖 Foco"
+            };
+            if components::secondary_button(ui, focus_label)
+                .on_hover_text("Modo enfoque (F11)")
+                .clicked()
+            {
+                actions.toggle_focus_mode = true;
+            }
+
+            let mode_text = if *showing_markdown_mode {
+                "📝 Editor"
+            } else {
+                "👁 Markdown"
+            };
+            if components::mode_toggle_button(ui, mode_text, *showing_markdown_mode).clicked() {
+                *showing_markdown_mode = !*showing_markdown_mode;
+                actions.toggle_preview = true;
+            }
+        });
+
+        ui.add_space(2.0);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.spacing_mut().item_spacing.y = 6.0;
 
             // Grupo: Encabezados
             ui.group(|ui| {
@@ -121,76 +150,56 @@ pub fn show_toolbar(
 
             // Grupo: Avisos (Notice)
             ui.group(|ui| {
-                let btn_note =
-                    egui::Button::new(egui::RichText::new("📝").color(egui::Color32::WHITE))
-                        .fill(egui::Color32::from_rgb(52, 152, 219));
-                if ui.add(btn_note).on_hover_text("Nota").clicked() {
+                if components::notice_icon_button(ui, "📝", theme::NoticeKind::Note, "Nota")
+                    .clicked()
+                {
                     actions.insert_notice_note = true;
                 }
 
-                let btn_tip =
-                    egui::Button::new(egui::RichText::new("💡").color(egui::Color32::WHITE))
-                        .fill(egui::Color32::from_rgb(155, 89, 182));
-                if ui.add(btn_tip).on_hover_text("Tip").clicked() {
+                if components::notice_icon_button(ui, "💡", theme::NoticeKind::Tip, "Tip").clicked()
+                {
                     actions.insert_notice_tip = true;
                 }
 
-                let btn_info =
-                    egui::Button::new(egui::RichText::new("\u{2139}").color(egui::Color32::WHITE))
-                        .fill(egui::Color32::from_rgb(52, 152, 219));
-                if ui.add(btn_info).on_hover_text("Info").clicked() {
+                if components::notice_icon_button(ui, "\u{2139}", theme::NoticeKind::Info, "Info")
+                    .clicked()
+                {
                     actions.insert_notice_info = true;
                 }
 
-                let btn_warn =
-                    egui::Button::new(egui::RichText::new("\u{26A0}").color(egui::Color32::WHITE))
-                        .fill(egui::Color32::from_rgb(241, 196, 15));
-                if ui.add(btn_warn).on_hover_text("Aviso").clicked() {
+                if components::notice_icon_button(
+                    ui,
+                    "\u{26A0}",
+                    theme::NoticeKind::Warning,
+                    "Aviso",
+                )
+                .clicked()
+                {
                     actions.insert_notice_warning = true;
                 }
 
-                let btn_danger =
-                    egui::Button::new(egui::RichText::new("\u{1F6AB}").color(egui::Color32::WHITE))
-                        .fill(egui::Color32::from_rgb(231, 76, 60));
-                if ui.add(btn_danger).on_hover_text("Peligro").clicked() {
+                if components::notice_icon_button(
+                    ui,
+                    "\u{1F6AB}",
+                    theme::NoticeKind::Danger,
+                    "Peligro",
+                )
+                .clicked()
+                {
                     actions.insert_notice_danger = true;
                 }
 
-                let btn_success =
-                    egui::Button::new(egui::RichText::new("\u{2714}").color(egui::Color32::WHITE))
-                        .fill(egui::Color32::from_rgb(46, 204, 113));
-                if ui.add(btn_success).on_hover_text("Éxito").clicked() {
+                if components::notice_icon_button(
+                    ui,
+                    "\u{2714}",
+                    theme::NoticeKind::Success,
+                    "Éxito",
+                )
+                .clicked()
+                {
                     actions.insert_notice_success = true;
                 }
             });
-        });
-
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let mode_text = if *showing_markdown_mode {
-                "📝 Editor"
-            } else {
-                "👁 Markdown"
-            };
-            if ui
-                .selectable_label(*showing_markdown_mode, mode_text)
-                .clicked()
-            {
-                *showing_markdown_mode = !*showing_markdown_mode;
-                actions.toggle_preview = true;
-            }
-            ui.separator();
-            let focus_label = if focus_mode {
-                "🔲 Salir Foco"
-            } else {
-                "📖 Foco"
-            };
-            if ui
-                .button(focus_label)
-                .on_hover_text("Modo enfoque (F11)")
-                .clicked()
-            {
-                actions.toggle_focus_mode = true;
-            }
         });
     });
 

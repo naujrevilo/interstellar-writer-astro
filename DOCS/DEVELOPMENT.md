@@ -1,6 +1,6 @@
 # Interstellar Writer - Documentación de Desarrollo
 
-> **Versión:** 1.0.5
+> **Versión:** 1.1.0 (release Fase 1 UI)
 > **Licencia:** AGPL-3.0
 > **Autor:** Juan Oliver
 
@@ -48,12 +48,14 @@ src/
 │   └── git.rs        # Sincronización con GitHub
 └── ui/               # Componentes visuales (View)
     ├── mod.rs
+    ├── components.rs # Componentes base reutilizables (botones, badges, secciones)
     ├── dashboard.rs  # Vista de tarjetas de publicaciones
     ├── dialogs.rs    # Ventanas modales
     ├── editor.rs     # Editor de contenido
     ├── panels.rs     # Paneles laterales
     ├── preview.rs    # Vista previa Markdown
     ├── splash.rs     # Pantalla de inicio
+    ├── theme.rs      # Tokens visuales y aplicación de tema global
     └── toolbar.rs    # Barra de herramientas superior
 ```
 
@@ -136,6 +138,8 @@ pub struct InterstellarApp {
 
 | Componente | Función |
 |------------|---------|
+| `theme.rs` | Sistema de tokens visuales (color, espaciado, tipografía) y aplicación de `Visuals`/`Style` global |
+| `components.rs` | Primitivas de UI reutilizables para evitar hardcodeos (botones primario/secundario/toggle, badges, notices, secciones) |
 | `toolbar.rs` | Barra superior con acciones globales (guardar, sync, tema) |
 | `panels.rs` | Panel izquierdo (colecciones/archivos) y derecho (metadatos) |
 | `dashboard.rs` | Vista de tarjetas tipo CMS para las publicaciones |
@@ -149,6 +153,48 @@ pub struct InterstellarApp {
 - `load_icon() -> IconData`: Carga el favicon PNG embebido
 - `apply_visuals(ctx, dark_mode)`: Configura el tema visual (VS Code style)
 - `pick_image_file()` / `pick_folder()`: Wrappers para diálogos nativos
+
+---
+
+## Sistema de Diseño (Fase 1)
+
+Introducido en v1.1.0. Elimina todos los colores y estilos hardcodeados de los módulos de UI.
+
+### `UiTokens` — Tokens visuales centralizados
+
+`UiTokens::for_mode(dark_mode: bool) -> UiTokens` produce una paleta completa para cada modo:
+
+| Token | Dark | Light | Propósito |
+|-------|------|-------|-----------|
+| `brand_primary` | `#007ACC` | `#007ACC` | Acento principal (botones primarios) |
+| `panel_bg` | `#1E1E1E` | `#F3F3F3` | Fondo de paneles |
+| `subtle_bg` | `#2D2D2D` | `#ECF0F1` | Fondo de elementos secundarios |
+| `border_subtle` | `gray(70)` | `gray(195)` | Bordes y separadores |
+| `text_default` | `gray(235)` | `gray(30)` | Texto principal |
+| `text_muted` | `gray(155)` | `gray(110)` | Texto secundario/placeholders |
+| `text_on_brand` | `#FFFFFF` | `#FFFFFF` | Texto sobre fondos de acento |
+
+### Selección de texto
+
+`apply_theme` configura `visuals.selection.bg_fill` con un color dedicado por modo, separado de `brand_primary`, para garantizar contraste con los colores de sintaxis del editor:
+
+| Modo | Color selección | Razón |
+|------|----------------|-------|
+| Dark | `rgb(38, 79, 120)` | VS Code `#264F78` — contrasta con headings azules |
+| Light | `rgb(173, 214, 255)` | Azul pastel — texto oscuro permanece legible |
+
+### `components.rs` — Primitivas reutilizables
+
+| Función | Descripción |
+|---------|-------------|
+| `primary_button(ui, label)` | Botón con fondo `brand_primary` y texto `text_on_brand` |
+| `secondary_button(ui, label)` | Botón con fondo `subtle_bg`, borde visible |
+| `mode_toggle_button(ui, label, selected)` | Botón toggle; relleno cambia con estado activo |
+| `danger_button(ui, label)` | Botón con fondo `brand_danger` |
+| `success_button(ui, label)` | Botón con fondo `brand_success` |
+| `notice_icon_button(ui, label)` | Botón compacto para acciones de notice |
+| `status_badge(ui, label, color)` | Badge de estado no interactivo |
+| `section_card(ui, tokens, add_contents)` | Contenedor con fondo `subtle_bg` y radio `radius_md` |
 
 ---
 
@@ -187,7 +233,7 @@ Se han identificado los siguientes puntos donde se usan métodos que pueden caus
 Para elevar la robustez a nivel de producción:
 
 1. **Reemplazar `unwrap()` con manejo explícito:**
-   
+
    ```rust
    // Antes (puede causar pánico)
    let name = path.file_name().unwrap().to_string_lossy();
@@ -197,8 +243,9 @@ Para elevar la robustez a nivel de producción:
        .map(|n| n.to_string_lossy().into_owned())
        .unwrap_or_else(|| "unknown".to_string());
    ```
+
 2. **Usar `anyhow` para propagación de errores:**
-   
+
    ```rust
    use anyhow::{Context, Result};
    
@@ -207,13 +254,26 @@ Para elevar la robustez a nivel de producción:
            .context(format!("Error leyendo {}", path.display()))
    }
    ```
+
 3. **Validar entradas antes de operar:**
-   
+
    ```rust
    if let Some(selected) = &self.selected_collection {
        // Operaciones seguras con `selected`
    }
    ```
+
+---
+
+## Convención operativa de release por fase
+
+Cada fase aprobada debe cerrarse con el siguiente paquete mínimo:
+
+1. Código implementado y revisado.
+2. Documentación actualizada (`README`, `DOCS/`, manual).
+3. `CHANGELOG.md` actualizado con cambios de la fase.
+4. Estrategia de versionado SemVer definida (al cortar release).
+5. Sincronización de artefactos públicos (GitHub release y landing page).
 
 ---
 
@@ -392,24 +452,27 @@ pub fn parse_content(content: &str) -> ParsedContent {
 1. **Fork** del repositorio en GitHub
 2. **Clonar** tu fork localmente
 3. **Crear rama** para tu feature:
-   
+
    ```bash
    git checkout -b feature/nombre-descriptivo
    ```
+
 4. **Desarrollar** siguiendo las convenciones de código
 5. **Añadir tests** para nueva funcionalidad
 6. **Verificar** que todo compila y los tests pasan:
-   
+
    ```bash
    cargo fmt
    cargo clippy
    cargo test
    ```
+
 7. **Commit** con mensajes descriptivos:
-   
+
    ```bash
    git commit -m "feat: añadir soporte para campo de tipo Select"
    ```
+
 8. **Push** y crear **Pull Request**
 
 ### Convenciones de Commits
@@ -436,5 +499,4 @@ Seguimos [Conventional Commits](https://www.conventionalcommits.org/):
 
 ---
 
-*Documentación actualizada para Interstellar Writer v1.0.5*
-
+*Documentación actualizada para Interstellar Writer v1.1.0*

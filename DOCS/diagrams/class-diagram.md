@@ -60,9 +60,45 @@ classDiagram
         Number
     }
 
+    class UiTokens {
+        +f32 radius_sm
+        +f32 radius_md
+        +f32 radius_pill
+        +f32 spacing_xs
+        +f32 spacing_sm
+        +f32 spacing_md
+        +f32 font_size_sm
+        +f32 font_size_md
+        +f32 font_size_lg
+        +Color32 brand_primary
+        +Color32 brand_success
+        +Color32 brand_warning
+        +Color32 brand_danger
+        +Color32 panel_bg
+        +Color32 subtle_bg
+        +Color32 border_subtle
+        +Color32 text_muted
+        +Color32 text_default
+        +Color32 text_on_brand
+        +for_mode(dark_mode) UiTokens
+        +notice_color(kind) Color32
+    }
+
+    class NoticeKind {
+        <<enumeration>>
+        Note
+        Tip
+        Info
+        Warning
+        Danger
+        Success
+    }
+
     InterstellarApp --> Config : usa
     InterstellarApp --> FileEntry : gestiona lista
+    InterstellarApp --> UiTokens : aplica via apply_theme
     Config --> CollectionDef : contiene
     CollectionDef --> FieldDef : define campos
     FieldDef --> FieldType : tiene tipo
+    UiTokens --> NoticeKind : mapea color
 ```

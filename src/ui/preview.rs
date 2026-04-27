@@ -2,6 +2,7 @@
 
 use eframe::egui;
 use crate::services::content::{clean_imports_for_preview, extract_attr};
+use crate::ui::theme::{self, NoticeKind};
 
 /// Renderiza el cuerpo del documento procesando componentes personalizados.
 pub fn render_body_preview(
@@ -68,64 +69,45 @@ fn render_notice_ui(
     body: &str,
     commonmark_cache: &mut egui_commonmark::CommonMarkCache,
 ) {
-    let (bg_color, border_color, text_color, icon) = match n_type {
-        "tip" => (
-            if ui.visuals().dark_mode { egui::Color32::from_rgba_premultiplied(88, 28, 135, 40) } else { egui::Color32::from_rgb(250, 245, 255) },
-            egui::Color32::from_rgb(155, 89, 182),
-            if ui.visuals().dark_mode { egui::Color32::from_rgb(233, 213, 255) } else { egui::Color32::from_rgb(88, 28, 135) },
-            "\u{1F4A1}" // 💡
-        ),
-        "warning" => (
-            if ui.visuals().dark_mode { egui::Color32::from_rgba_premultiplied(113, 63, 18, 40) } else { egui::Color32::from_rgb(254, 252, 232) },
-            egui::Color32::from_rgb(241, 196, 15),
-            if ui.visuals().dark_mode { egui::Color32::from_rgb(254, 249, 195) } else { egui::Color32::from_rgb(113, 63, 18) },
-            "\u{26A0}" // ⚠️
-        ),
-        "danger" => (
-            if ui.visuals().dark_mode { egui::Color32::from_rgba_premultiplied(127, 29, 29, 40) } else { egui::Color32::from_rgb(254, 242, 242) },
-            egui::Color32::from_rgb(231, 76, 60),
-            if ui.visuals().dark_mode { egui::Color32::from_rgb(254, 226, 226) } else { egui::Color32::from_rgb(127, 29, 29) },
-            "\u{1F6AB}" // 🚫
-        ),
-        "success" => (
-            if ui.visuals().dark_mode { egui::Color32::from_rgba_premultiplied(6, 78, 59, 40) } else { egui::Color32::from_rgb(240, 253, 244) },
-            egui::Color32::from_rgb(46, 204, 113),
-            if ui.visuals().dark_mode { egui::Color32::from_rgb(187, 247, 208) } else { egui::Color32::from_rgb(6, 78, 59) },
-            "\u{2714}" // ✔
-        ),
-        "note" | "info" => (
-            if ui.visuals().dark_mode { egui::Color32::from_rgba_premultiplied(30, 58, 138, 40) } else { egui::Color32::from_rgb(239, 246, 255) },
-            egui::Color32::from_rgb(52, 152, 219),
-            if ui.visuals().dark_mode { egui::Color32::from_rgb(191, 219, 254) } else { egui::Color32::from_rgb(30, 58, 138) },
-            if n_type == "note" { "\u{1F4DD}" } else { "\u{2139}" } // 📝 or ℹ
-        ),
-        _ => (
-            ui.visuals().widgets.noninteractive.bg_fill,
-            ui.visuals().widgets.noninteractive.bg_stroke.color,
-            ui.visuals().text_color(),
-            "\u{2139}"
-        )
+    let tokens = theme::tokens_from_ui(ui);
+    let (notice_kind, icon) = match n_type {
+        "tip" => (NoticeKind::Tip, "\u{1F4A1}"),      // 💡
+        "warning" => (NoticeKind::Warning, "\u{26A0}"), // ⚠️
+        "danger" => (NoticeKind::Danger, "\u{1F6AB}"),  // 🚫
+        "success" => (NoticeKind::Success, "\u{2714}"), // ✔
+        "note" => (NoticeKind::Note, "\u{1F4DD}"),      // 📝
+        _ => (NoticeKind::Info, "\u{2139}"),             // ℹ
     };
+
+    let border_color = tokens.notice_color(notice_kind);
+    let bg_alpha = if ui.visuals().dark_mode { 56 } else { 24 };
+    let bg_color = egui::Color32::from_rgba_premultiplied(
+        border_color.r(),
+        border_color.g(),
+        border_color.b(),
+        bg_alpha,
+    );
+    let text_color = tokens.text_default;
 
     egui::Frame::group(ui.style())
         .fill(bg_color)
         .stroke(egui::Stroke::new(1.0, border_color))
-        .rounding(8.0)
-        .inner_margin(12.0)
+        .rounding(tokens.radius_md)
+        .inner_margin(tokens.spacing_md)
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(icon).size(20.0).color(border_color));
+                ui.label(egui::RichText::new(icon).size(tokens.font_size_lg).color(border_color));
                 if !title.is_empty() {
-                    ui.label(egui::RichText::new(title).strong().size(16.0).color(text_color));
+                    ui.label(egui::RichText::new(title).strong().size(tokens.font_size_md + 2.0).color(text_color));
                 }
             });
-            ui.add_space(4.0);
+            ui.add_space(tokens.spacing_xs);
             
             // Contenido dentro del aviso, renderizado como Markdown
             egui_commonmark::CommonMarkViewer::new()
                 .show(ui, commonmark_cache, body.trim());
         });
-    ui.add_space(10.0);
+    ui.add_space(tokens.spacing_md - 2.0);
 }
 
 /// Muestra la ventana flotante de vista previa.

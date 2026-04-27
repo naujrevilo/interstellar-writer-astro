@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::models::{Config, FieldType, FileEntry, ProjectConfig};
 use crate::services::{content, files, git};
-use crate::ui::{dialogs, dashboard, toolbar, editor, preview, splash};
+use crate::ui::{dialogs, dashboard, toolbar, editor, preview, splash, theme, components};
 use crate::utils;
 
 /// Estructura principal de la aplicación que mantiene el estado global.
@@ -188,6 +188,7 @@ impl InterstellarApp {
     }
 
     fn render_generic_metadata(&mut self, ui: &mut egui::Ui) {
+        let tokens = theme::tokens_from_ui(ui);
         let keys: Vec<serde_yaml::Value> = self.frontmatter.keys().cloned().collect();
         for key in keys {
             let label = match &key {
@@ -224,14 +225,13 @@ impl InterstellarApp {
                             let mut to_remove = None;
                             for (i, val) in seq.iter().enumerate() {
                                 if let Some(text) = val.as_str() {
-                                    let btn = egui::Button::new(
-                                        egui::RichText::new(format!("{} ✖", text))
-                                            .size(12.0)
-                                            .color(egui::Color32::WHITE),
+                                    if components::status_badge(
+                                        ui,
+                                        &format!("{} ✖", text),
+                                        tokens.text_muted,
                                     )
-                                    .fill(egui::Color32::from_rgb(100, 100, 100))
-                                    .rounding(12.0);
-                                    if ui.add(btn).clicked() {
+                                    .clicked()
+                                    {
                                         to_remove = Some(i);
                                     }
                                 }
@@ -859,7 +859,7 @@ impl eframe::App for InterstellarApp {
         }
 
         self.toasts.show(ctx);
-        utils::apply_visuals(ctx, self.config.dark_mode);
+        theme::apply_theme(ctx, self.config.dark_mode);
 
         // --- ATAJOS DE TECLADO ---
         let mut save_now = false;
@@ -893,14 +893,14 @@ impl eframe::App for InterstellarApp {
             egui::Window::new("Borrador recuperado").show(ctx, |ui| {
                 ui.label("Existe un borrador más reciente sin guardar. ¿Restaurar?");
                 ui.horizontal(|ui| {
-                    if ui.button("✅ Restaurar borrador").clicked() {
+                    if components::success_button(ui, "✅ Restaurar borrador").clicked() {
                         if let Some(c) = self.backup_content_candidate.take() {
                             self.body = c;
                             self.is_dirty = true;
                         }
                         self.showing_recovery_dialog = false;
                     }
-                    if ui.button("🗑 Descartar").clicked() {
+                    if components::danger_button(ui, "🗑 Descartar").clicked() {
                         self.backup_content_candidate = None;
                         self.showing_recovery_dialog = false;
                         if let Some(bp) = self.backup_path() { let _ = std::fs::remove_file(bp); }
@@ -1021,6 +1021,7 @@ impl eframe::App for InterstellarApp {
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
+                let tokens = theme::tokens_from_ui(ui);
                 ui.add(egui::Image::new(egui::include_image!("../logo.svg")).max_height(24.0));
                 ui.add_space(4.0);
                 ui.heading("Interstellar Writer");
@@ -1033,20 +1034,20 @@ impl eframe::App for InterstellarApp {
                     if parts.len() > 1 {
                         for (i, part) in parts.iter().enumerate() {
                             if i > 0 {
-                                ui.label(egui::RichText::new("›").color(egui::Color32::from_gray(130)));
+                                ui.label(egui::RichText::new("›").color(tokens.text_muted));
                             }
                             let is_last = i == parts.len() - 1;
                             let text = if is_last {
                                 egui::RichText::new(format!("{}{}", part, dirty_mark))
                                     .strong()
-                                    .color(egui::Color32::from_rgb(52, 152, 219))
+                                    .color(tokens.brand_primary)
                             } else {
-                                egui::RichText::new(*part).color(egui::Color32::from_gray(160))
+                                egui::RichText::new(*part).color(tokens.text_muted)
                             };
                             ui.label(text);
                         }
                     } else {
-                        ui.label(egui::RichText::new(format!("📝 {}{}", file, dirty_mark)).strong().color(egui::Color32::from_rgb(52, 152, 219)));
+                        ui.label(egui::RichText::new(format!("📝 {}{}", file, dirty_mark)).strong().color(tokens.brand_primary));
                     }
                 }
 
@@ -1063,9 +1064,10 @@ impl eframe::App for InterstellarApp {
 
                     if self.config.repo_path.is_some() {
                         ui.separator();
-                        let commit_btn = egui::Button::new(egui::RichText::new("📤 Commit & Push").color(egui::Color32::WHITE))
-                            .fill(egui::Color32::from_rgb(41, 128, 185));
-                        if ui.add(commit_btn).on_hover_text("Sincronizar todos los cambios con GitHub").clicked() {
+                        if components::primary_button(ui, "📤 Commit & Push")
+                            .on_hover_text("Sincronizar todos los cambios con GitHub")
+                            .clicked()
+                        {
                             self.showing_commit_confirm = true;
                         }
                     }
@@ -1073,9 +1075,7 @@ impl eframe::App for InterstellarApp {
                     if self.selected_file.is_some() {
                         ui.separator();
                         
-                        let save_btn = egui::Button::new(egui::RichText::new("💾 Guardar").color(egui::Color32::WHITE))
-                            .fill(egui::Color32::from_rgb(39, 174, 96));
-                        if ui.add(save_btn).clicked() {
+                        if components::success_button(ui, "💾 Guardar").clicked() {
                             self.save_file();
                         }
 
@@ -1083,10 +1083,11 @@ impl eframe::App for InterstellarApp {
                             .and_then(|v| v.as_bool())
                             .unwrap_or(false);
                         
-                        let delete_btn = egui::Button::new(egui::RichText::new("🗑").color(egui::Color32::WHITE))
-                            .fill(if is_draft { egui::Color32::from_rgb(192, 57, 43) } else { egui::Color32::from_gray(100) });
-                        
-                        let resp = ui.add(delete_btn);
+                        let resp = if is_draft {
+                            components::danger_button(ui, "🗑")
+                        } else {
+                            ui.button("🗑")
+                        };
                         if resp.on_hover_text(if is_draft { "Eliminar este borrador" } else { "Solo se pueden eliminar archivos con draft: true" }).clicked() {
                             if is_draft {
                                 self.showing_delete_confirm = true;
@@ -1134,7 +1135,7 @@ impl eframe::App for InterstellarApp {
                     ui.horizontal(|ui| {
                         ui.heading("📂 Colecciones");
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("🔄").clicked() { 
+                            if components::secondary_button(ui, "🔄").clicked() { 
                                 self.refresh_collections(); 
                             }
                         });
@@ -1159,7 +1160,7 @@ impl eframe::App for InterstellarApp {
                     ui.horizontal(|ui| {
                         ui.heading(format!("📄 {}", coll));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("➕").clicked() { 
+                            if components::primary_button(ui, "➕").clicked() { 
                                 self.showing_new_file_dialog = true; 
                             }
                         });
@@ -1171,7 +1172,7 @@ impl eframe::App for InterstellarApp {
                                 .hint_text("🔍 Filtrar…")
                                 .desired_width(ui.available_width() - 30.0),
                         );
-                        if !self.file_filter.is_empty() && ui.button("✕").clicked() {
+                        if !self.file_filter.is_empty() && components::secondary_button(ui, "✕").clicked() {
                             self.file_filter.clear();
                         }
                     });
@@ -1218,10 +1219,11 @@ impl eframe::App for InterstellarApp {
             .resizable(true)
             .default_width(300.0)
             .show_animated(ctx, self.showing_metadata && self.selected_file.is_some() && !self.focus_mode, |ui| {
+                let tokens = theme::tokens_from_ui(ui);
                 ui.horizontal(|ui| {
                     ui.heading("📝 Metadatos");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("🔧").on_hover_text("Recalcular rutas").clicked() { 
+                        if components::secondary_button(ui, "🔧").on_hover_text("Recalcular rutas").clicked() { 
                             self.fix_all_image_paths(); 
                         }
                     });
@@ -1244,8 +1246,8 @@ impl eframe::App for InterstellarApp {
                             let mut handled_keys = std::collections::HashSet::new();
                             
                             ui.group(|ui| {
-                                ui.label(egui::RichText::new("General").strong().size(16.0));
-                                ui.add_space(5.0);
+                                ui.label(egui::RichText::new("General").strong().size(tokens.font_size_md + 2.0));
+                                ui.add_space(tokens.spacing_xs + 1.0);
                                 
                                 for field_name in &["title", "description", "date", "publishDate", "draft"] {
                                     if let Some(field) = def.fields.iter().find(|f| f.name == *field_name) {
@@ -1284,11 +1286,11 @@ impl eframe::App for InterstellarApp {
                                 }
                             });
 
-                            ui.add_space(10.0);
+                            ui.add_space(tokens.spacing_md - 2.0);
                             
                             ui.group(|ui| {
-                                ui.label(egui::RichText::new("Taxonomía e Imágenes").strong().size(16.0));
-                                ui.add_space(5.0);
+                                ui.label(egui::RichText::new("Taxonomía e Imágenes").strong().size(tokens.font_size_md + 2.0));
+                                ui.add_space(tokens.spacing_xs + 1.0);
 
                                 for field in &def.fields {
                                     let yaml_key = serde_yaml::Value::String(field.name.clone());
@@ -1324,16 +1326,13 @@ impl eframe::App for InterstellarApp {
                                                         let mut to_remove = None;
                                                         for (i, val) in seq.iter().enumerate() {
                                                             if let Some(tag) = val.as_str() {
-                                                                let btn = egui::Button::new(
-                                                                    egui::RichText::new(format!("{} ✖", tag))
-                                                                        .size(12.0)
-                                                                        .color(egui::Color32::WHITE),
+                                                                if components::status_badge(
+                                                                    ui,
+                                                                    &format!("{} ✖", tag),
+                                                                    tokens.brand_primary,
                                                                 )
-                                                                .fill(egui::Color32::from_rgb(
-                                                                    0, 122, 204,
-                                                                ))
-                                                                .rounding(12.0);
-                                                                if ui.add(btn).clicked() {
+                                                                .clicked()
+                                                                {
                                                                     to_remove = Some(i);
                                                                 }
                                                             }
@@ -1392,10 +1391,15 @@ impl eframe::App for InterstellarApp {
                                                         let mut to_remove = None;
                                                         for (i, val) in seq.iter().enumerate() {
                                                             if let Some(tag) = val.as_str() {
-                                                                let btn = egui::Button::new(egui::RichText::new(format!("{} ✖", tag)).size(12.0).color(egui::Color32::WHITE))
-                                                                    .fill(egui::Color32::from_rgb(100, 100, 100))
-                                                                    .rounding(12.0);
-                                                                if ui.add(btn).clicked() { to_remove = Some(i); }
+                                                                if components::status_badge(
+                                                                    ui,
+                                                                    &format!("{} ✖", tag),
+                                                                    tokens.text_muted,
+                                                                )
+                                                                .clicked()
+                                                                {
+                                                                    to_remove = Some(i);
+                                                                }
                                                             }
                                                         }
                                                         if let Some(i) = to_remove { seq.remove(i); }
@@ -1429,24 +1433,30 @@ impl eframe::App for InterstellarApp {
                                 }
                             });
 
-                            ui.add_space(10.0);
+                            ui.add_space(tokens.spacing_md - 2.0);
                             ui.group(|ui| {
-                                ui.label(egui::RichText::new("Componentes MDX").strong().size(16.0));
-                                ui.add_space(5.0);
-                                let btn_notice = egui::Button::new("📦 Importar Notice").fill(egui::Color32::from_rgb(52, 152, 219));
-                                if ui.add(btn_notice).on_hover_text("Añade el import de Notice.astro").clicked() {
+                                ui.label(egui::RichText::new("Componentes MDX").strong().size(tokens.font_size_md + 2.0));
+                                ui.add_space(tokens.spacing_xs + 1.0);
+                                if components::primary_button(ui, "📦 Importar Notice")
+                                    .on_hover_text("Añade el import de Notice.astro")
+                                    .clicked()
+                                {
                                     let rel_path = content::calculate_rel_path(&content_dir, &cur_coll, &cur_file, "src/components/Notice.astro");
                                     let import_stmt = format!("import Notice from \"{}\";", rel_path);
                                     self.ensure_import(&import_stmt);
                                 }
-                                let btn_cta = egui::Button::new("📢 Importar CTABox").fill(egui::Color32::from_rgb(41, 128, 185));
-                                if ui.add(btn_cta).on_hover_text("Añade el import de CTABox.astro").clicked() {
+                                if components::secondary_button(ui, "📢 Importar CTABox")
+                                    .on_hover_text("Añade el import de CTABox.astro")
+                                    .clicked()
+                                {
                                     let rel_path = content::calculate_rel_path(&content_dir, &cur_coll, &cur_file, "src/components/CTABox.astro");
                                     let import_stmt = format!("import CTABox from \"{}\";", rel_path);
                                     self.ensure_import(&import_stmt);
                                 }
-                                let btn_img = egui::Button::new("🖼 Importar Image").fill(egui::Color32::from_rgb(39, 174, 96));
-                                if ui.add(btn_img).on_hover_text("Añade el import de Image de astro:assets").clicked() {
+                                if components::success_button(ui, "🖼 Importar Image")
+                                    .on_hover_text("Añade el import de Image de astro:assets")
+                                    .clicked()
+                                {
                                     self.ensure_import("import { Image } from \"astro:assets\";");
                                 }
                             });
