@@ -17,7 +17,7 @@ pub fn show_about_dialog(ctx: &egui::Context, showing: &mut bool) {
                 ui.add(egui::Image::new(egui::include_image!("../../logo.svg")).max_width(100.0));
                 ui.add_space(tokens.spacing_md - 2.0);
                 ui.heading("Interstellar Writer");
-                ui.label("v1.1.0");
+                ui.label(concat!("v", env!("CARGO_PKG_VERSION")));
                 ui.add_space(tokens.spacing_md - 2.0);
                 ui.label("Tu compañero galáctico para Astro & MDX.");
                 ui.add_space(tokens.spacing_md - 2.0);

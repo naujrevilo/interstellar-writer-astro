@@ -1,43 +1,61 @@
-//! Pantalla de inicio (Splash Screen).
+//! Splash screen — minimal warm aesthetic.
 
 use eframe::egui;
+use crate::ui::theme;
 
-/// Muestra la pantalla de splash durante el inicio de la aplicación.
-/// Retorna `true` si el splash ha terminado.
+/// Show the splash screen. Returns `true` when done.
 pub fn show_splash(
-    ctx: &egui::Context, 
+    ctx: &egui::Context,
     splash_start_time: &mut Option<std::time::Instant>,
 ) -> bool {
-    // Si es el primer frame, inicializamos el temporizador
     if splash_start_time.is_none() {
         *splash_start_time = Some(std::time::Instant::now());
     }
 
     if let Some(start_time) = splash_start_time {
-        // Mostrar splash durante 3 segundos
-        if start_time.elapsed().as_secs_f32() < 3.0 {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                ui.centered_and_justified(|ui| {
+        if start_time.elapsed().as_secs_f32() < 2.5 {
+            let tokens = theme::UiTokens::for_mode(ctx.style().visuals.dark_mode);
+
+            egui::CentralPanel::default()
+                .frame(egui::Frame::none().fill(tokens.panel_bg))
+                .show(ctx, |ui| {
+                    let total_h = ui.available_height();
                     ui.vertical_centered(|ui| {
-                        ui.add_space(ui.available_height() * 0.2);
-                        ui.add(egui::Image::new(egui::include_image!("../../logo.svg")).max_height(200.0));
+                        ui.add_space(total_h * 0.30);
+
+                        // Logo — compact
+                        ui.add(
+                            egui::Image::new(egui::include_image!("../../logo.svg"))
+                                .max_height(80.0),
+                        );
+                        ui.add_space(20.0);
+
+                        // Title in Newsreader (Proportional) — editorial feel
+                        ui.label(
+                            egui::RichText::new("Interstellar Writer")
+                                .font(egui::FontId::proportional(36.0))
+                                .italics()
+                                .color(tokens.text_primary),
+                        );
+                        ui.add_space(6.0);
+
+                        // Subtitle — muted
+                        ui.label(
+                            egui::RichText::new("A writing companion for Astro content")
+                                .font(egui::FontId::proportional(14.0))
+                                .color(tokens.text_muted),
+                        );
                         ui.add_space(30.0);
-                        ui.heading(egui::RichText::new("Interstellar Writer for MD/MDX").size(48.0).strong());
-                        ui.add_space(10.0);
-                        ui.label(egui::RichText::new("Tu compañero galáctico para MD/MDX").size(20.0).italics());
-                        ui.add_space(40.0);
-                        ui.add(egui::Spinner::new().size(30.0));
-                        ui.add_space(15.0);
-                        ui.label(egui::RichText::new("Cargando motores de curvatura...").color(egui::Color32::GRAY));
-                        
-                        // Forzar repintado para la animación
+
+                        // Minimal spinner
+                        ui.add(egui::Spinner::new().size(18.0).color(tokens.text_faint));
+
                         ctx.request_repaint();
                     });
                 });
-            });
-            return false; // Splash no terminado
+            return false;
         }
     }
-    
-    true // Splash terminado
+
+    true
 }

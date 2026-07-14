@@ -167,7 +167,9 @@ pub fn read_file(
     file: &str,
 ) -> Option<String> {
     let file_path = repo_path.join(content_dir).join(collection).join(file);
-    std::fs::read_to_string(file_path).ok()
+    std::fs::read_to_string(file_path)
+        .ok()
+        .map(|s| s.replace("\r\n", "\n"))
 }
 
 /// Guarda el contenido en un archivo.

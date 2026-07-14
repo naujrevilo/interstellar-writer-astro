@@ -84,6 +84,10 @@ pub struct InterstellarApp {
     showing_command_palette: bool,
     /// Query de búsqueda de la paleta de comandos
     command_palette_query: String,
+    /// Acción de toolbar pendiente de procesar (para resolver timing con selection)
+    pending_toolbar_action: Option<(String, String)>,
+    /// Whether the formatting toolbar is expanded (default: hidden per v3 design)
+    showing_toolbar: bool,
 }
 
 impl InterstellarApp {
@@ -279,7 +283,29 @@ impl InterstellarApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // Habilitar cargadores de imágenes (PNG, JPG, etc.)
         egui_extras::install_image_loaders(&cc.egui_ctx);
-        
+
+        // Cargar Newsreader como fuente principal (editorial)
+        let mut fonts = egui::FontDefinitions::default();
+        fonts.font_data.insert(
+            "Newsreader".to_owned(),
+            egui::FontData::from_static(
+                include_bytes!("assets/fonts/Newsreader-VariableFont_opsz,wght.ttf"),
+            ),
+        );
+        fonts.font_data.insert(
+            "Newsreader-Italic".to_owned(),
+            egui::FontData::from_static(
+                include_bytes!("assets/fonts/Newsreader-Italic-VariableFont_opsz,wght.ttf"),
+            ),
+        );
+        // Newsreader como primera opción proporcional (fallback a la default de egui)
+        fonts
+            .families
+            .get_mut(&egui::FontFamily::Proportional)
+            .unwrap()
+            .insert(0, "Newsreader".to_owned());
+        cc.egui_ctx.set_fonts(fonts);
+
         let config = Config::load();
         let mut app = Self {
             config,
@@ -323,6 +349,8 @@ impl InterstellarApp {
             file_filter: String::new(),
             showing_command_palette: false,
             command_palette_query: String::new(),
+            pending_toolbar_action: None,
+            showing_toolbar: false,
         };
         app.refresh_collections();
         app
@@ -589,25 +617,23 @@ impl InterstellarApp {
         let (start_char, end_char) = self.selection.unwrap_or((self.body.chars().count(), self.body.chars().count()));
         let start_idx = start_char.min(end_char);
         let end_idx = start_char.max(end_char);
+        let had_selection = start_idx != end_idx;
 
         let mut char_indices = self.body.char_indices();
         let start_byte = char_indices.nth(start_idx).map(|(i, _)| i).unwrap_or(self.body.len());
         let end_byte = self.body.char_indices().nth(end_idx).map(|(i, _)| i).unwrap_or(self.body.len());
 
         let mut selected_text = self.body[start_byte..end_byte].to_string();
-        
-        // Si no hay selección, usar texto por defecto
-        if selected_text.is_empty() {
-            if before == "**" && after == "**" {
-                selected_text = "texto".to_string();
-            } else if before == "*" && after == "*" {
-                selected_text = "texto".to_string();
-            } else if before == "[" && after == "](url)" {
-                selected_text = "título".to_string();
-            } else if before.contains("<Notice") {
+        let mut select_inserted_text = false;
+
+        if !had_selection {
+            selected_text.clear();
+            if before.contains("<Notice") {
                 selected_text = "Escribe aquí tu contenido...".to_string();
+                select_inserted_text = true;
             } else if before.contains("```") || before.contains("<pre") {
                 selected_text = "\n  // Código aquí\n".to_string();
+                select_inserted_text = true;
             }
         }
 
@@ -636,10 +662,25 @@ impl InterstellarApp {
         new_body.push_str(&self.body[end_byte..]);
         
         self.body = new_body;
-        
-        let new_pos = start_idx + final_before.chars().count() + selected_text.chars().count() + after.chars().count();
-        self.selection = Some((new_pos, new_pos));
-        self.pending_selection = Some((new_pos, new_pos));
+
+        let before_len = final_before.chars().count();
+        let selected_len = selected_text.chars().count();
+        let after_len = after.chars().count();
+
+        if had_selection {
+            let new_pos = start_idx + before_len + selected_len + after_len;
+            self.selection = Some((new_pos, new_pos));
+            self.pending_selection = Some((new_pos, new_pos));
+        } else if select_inserted_text && selected_len > 0 {
+            let sel_start = start_idx + before_len;
+            let sel_end = sel_start + selected_len;
+            self.selection = Some((sel_start, sel_end));
+            self.pending_selection = Some((sel_start, sel_end));
+        } else {
+            let new_pos = start_idx + before_len;
+            self.selection = Some((new_pos, new_pos));
+            self.pending_selection = Some((new_pos, new_pos));
+        }
         self.is_dirty = true;
     }
 
@@ -998,127 +1039,160 @@ impl eframe::App for InterstellarApp {
             }
         }
 
-        // --- BARRA SUPERIOR ---
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
-                ui.menu_button("Vista", |ui| {
-                    ui.checkbox(&mut self.showing_collections, "\u{1F4C2} Colecciones");
-                    ui.checkbox(&mut self.showing_files, "\u{1F4C4} Archivos");
-                    ui.checkbox(&mut self.showing_metadata, "\u{1F4DD} Metadatos");
-                    ui.checkbox(&mut self.showing_preview, "\u{1F441} Vista Previa");
-                });
-                ui.menu_button("Ayuda", |ui| {
-                    if ui.button("📖 Manual de Usuario").clicked() {
-                        self.showing_manual = true;
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    if ui.button("ℹ Acerca de...").clicked() {
-                        self.showing_about_dialog = true;
-                        ui.close_menu();
-                    }
-                });
-            });
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
+        // --- TOP BAR — minimal chrome ---
+        egui::TopBottomPanel::top("top_panel")
+            .frame(egui::Frame::none()
+                .fill(if self.config.dark_mode {
+                    egui::Color32::from_rgb(23, 23, 26) // panel_sidebar_bg dark
+                } else {
+                    egui::Color32::from_rgb(236, 234, 231) // panel_sidebar_bg light
+                })
+                .inner_margin(egui::Margin::symmetric(12.0, 6.0)))
+            .show(ctx, |ui| {
                 let tokens = theme::tokens_from_ui(ui);
-                ui.add(egui::Image::new(egui::include_image!("../logo.svg")).max_height(24.0));
-                ui.add_space(4.0);
-                ui.heading("Interstellar Writer");
-                
-                if let Some(file) = &self.selected_file {
-                    ui.separator();
-                    let dirty_mark = if self.is_dirty { " ●" } else { "" };
-                    // Breadcrumbs para subcarpetas
-                    let parts: Vec<&str> = file.split('/').collect();
-                    if parts.len() > 1 {
-                        for (i, part) in parts.iter().enumerate() {
-                            if i > 0 {
-                                ui.label(egui::RichText::new("›").color(tokens.text_muted));
+                ui.horizontal(|ui| {
+                    // Logo + title
+                    ui.add(egui::Image::new(egui::include_image!("../logo.svg")).max_height(18.0));
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new("Interstellar Writer")
+                            .font(egui::FontId::proportional(14.0))
+                            .color(tokens.text_muted),
+                    );
+
+                    // Breadcrumbs if file is open
+                    if let Some(file) = &self.selected_file {
+                        ui.label(egui::RichText::new("/").color(tokens.text_faint));
+                        let dirty_mark = if self.is_dirty { " ●" } else { "" };
+                        let parts: Vec<&str> = file.split('/').collect();
+                        if parts.len() > 1 {
+                            for (i, part) in parts.iter().enumerate() {
+                                if i > 0 {
+                                    ui.label(egui::RichText::new("/").color(tokens.text_faint));
+                                }
+                                let is_last = i == parts.len() - 1;
+                                let text = if is_last {
+                                    egui::RichText::new(format!("{}{}", part, dirty_mark))
+                                        .color(tokens.text_primary)
+                                } else {
+                                    egui::RichText::new(*part).color(tokens.text_muted)
+                                };
+                                ui.label(text);
                             }
-                            let is_last = i == parts.len() - 1;
-                            let text = if is_last {
-                                egui::RichText::new(format!("{}{}", part, dirty_mark))
-                                    .strong()
-                                    .color(tokens.brand_primary)
-                            } else {
-                                egui::RichText::new(*part).color(tokens.text_muted)
-                            };
-                            ui.label(text);
+                        } else {
+                            ui.label(
+                                egui::RichText::new(format!("{}{}", file, dirty_mark))
+                                    .color(tokens.text_primary),
+                            );
                         }
-                    } else {
-                        ui.label(egui::RichText::new(format!("📝 {}{}", file, dirty_mark)).strong().color(tokens.brand_primary));
-                    }
-                }
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("⚙").on_hover_text("Configuración").clicked() {
-                        self.showing_config_dialog = true;
-                    }
-                    
-                    let theme_icon = if self.config.dark_mode { "🌙" } else { "☀️" };
-                    if ui.button(theme_icon).clicked() {
-                        self.config.dark_mode = !self.config.dark_mode;
-                        self.config.save();
                     }
 
-                    if self.config.repo_path.is_some() {
-                        ui.separator();
-                        if components::primary_button(ui, "📤 Commit & Push")
-                            .on_hover_text("Sincronizar todos los cambios con GitHub")
+                    // Right-aligned actions
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Settings
+                        if ui
+                            .add(egui::Button::new(egui::RichText::new("Settings").color(tokens.text_muted).small()).fill(egui::Color32::TRANSPARENT))
                             .clicked()
                         {
-                            self.showing_commit_confirm = true;
-                        }
-                    }
-
-                    if self.selected_file.is_some() {
-                        ui.separator();
-                        
-                        if components::success_button(ui, "💾 Guardar").clicked() {
-                            self.save_file();
+                            self.showing_config_dialog = true;
                         }
 
-                        let is_draft = self.frontmatter.get(&serde_yaml::Value::String("draft".to_string()))
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        
-                        let resp = if is_draft {
-                            components::danger_button(ui, "🗑")
-                        } else {
-                            ui.button("🗑")
-                        };
-                        if resp.on_hover_text(if is_draft { "Eliminar este borrador" } else { "Solo se pueden eliminar archivos con draft: true" }).clicked() {
-                            if is_draft {
-                                self.showing_delete_confirm = true;
-                            } else {
-                                self.status_message = "⚠️ Solo se pueden eliminar archivos en estado 'draft: true'".to_string();
-                                self.toasts.warning(&self.status_message);
+                        // Theme toggle
+                        let theme_label = if self.config.dark_mode { "Light" } else { "Dark" };
+                        if ui
+                            .add(egui::Button::new(egui::RichText::new(theme_label).color(tokens.text_muted).small()).fill(egui::Color32::TRANSPARENT))
+                            .clicked()
+                        {
+                            self.config.dark_mode = !self.config.dark_mode;
+                            self.config.save();
+                        }
+
+                        // View toggles via menu
+                        ui.menu_button(egui::RichText::new("View").color(tokens.text_muted).small(), |ui| {
+                            ui.checkbox(&mut self.showing_collections, "Collections");
+                            ui.checkbox(&mut self.showing_files, "Files");
+                            ui.checkbox(&mut self.showing_metadata, "Metadata");
+                            ui.checkbox(&mut self.showing_preview, "Preview");
+                        });
+
+                        // Help menu
+                        ui.menu_button(egui::RichText::new("Help").color(tokens.text_muted).small(), |ui| {
+                            if ui.button("User Manual").clicked() {
+                                self.showing_manual = true;
+                                ui.close_menu();
+                            }
+                            if ui.button("About").clicked() {
+                                self.showing_about_dialog = true;
+                                ui.close_menu();
+                            }
+                        });
+
+                        // Push/sync
+                        if self.config.repo_path.is_some() {
+                            if ui
+                                .add(egui::Button::new(egui::RichText::new("Push").color(tokens.brand_primary).small()).fill(egui::Color32::TRANSPARENT))
+                                .on_hover_text("Commit & push to GitHub")
+                                .clicked()
+                            {
+                                self.showing_commit_confirm = true;
                             }
                         }
-                    }
-                });
-            });
-            ui.add_space(4.0);
-        });
 
-        // --- BARRA INFERIOR ---
-        egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(&self.status_message);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(repo) = &self.config.repo_path {
-                        ui.label(format!("Repo: {}", repo.display()));
-                    }
-                    if self.selected_file.is_some() {
-                        ui.separator();
-                        let words = self.body.split_whitespace().count();
-                        let mins = (words / 200).max(1);
-                        ui.label(format!("{} palabras · ~{} min", words, mins));
-                    }
+                        // Save + delete when file is open
+                        if self.selected_file.is_some() {
+                            if ui
+                                .add(egui::Button::new(egui::RichText::new("Save").color(tokens.brand_success).small()).fill(egui::Color32::TRANSPARENT))
+                                .clicked()
+                            {
+                                self.save_file();
+                            }
+
+                            let is_draft = self
+                                .frontmatter
+                                .get(&serde_yaml::Value::String("draft".to_string()))
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+
+                            if is_draft {
+                                if ui
+                                    .add(egui::Button::new(egui::RichText::new("Del").color(tokens.brand_danger).small()).fill(egui::Color32::TRANSPARENT))
+                                    .on_hover_text("Delete this draft")
+                                    .clicked()
+                                {
+                                    self.showing_delete_confirm = true;
+                                }
+                            }
+                        }
+                    });
                 });
             });
-        });
+
+        // --- BOTTOM BAR — subtle status ---
+        egui::TopBottomPanel::bottom("bottom_panel")
+            .frame(egui::Frame::none()
+                .fill(if self.config.dark_mode {
+                    egui::Color32::from_rgb(23, 23, 26)
+                } else {
+                    egui::Color32::from_rgb(236, 234, 231)
+                })
+                .inner_margin(egui::Margin::symmetric(12.0, 4.0)))
+            .show(ctx, |ui| {
+                let tokens = theme::tokens_from_ui(ui);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(&self.status_message).color(tokens.text_muted).small());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if self.selected_file.is_some() {
+                            let words = self.body.split_whitespace().count();
+                            let mins = (words / 200).max(1);
+                            ui.label(
+                                egui::RichText::new(format!("{} words  ~{} min", words, mins))
+                                    .color(tokens.text_faint)
+                                    .small(),
+                            );
+                        }
+                    });
+                });
+            });
 
         // --- PANEL IZQUIERDO ---
         let collections = self.collections.clone();
@@ -1126,23 +1200,79 @@ impl eframe::App for InterstellarApp {
         let mut should_refresh_files = false;
         let mut should_refresh_tags = false;
         let mut file_to_load: Option<String> = None;
-        
-        egui::SidePanel::left("left_explorer")
-            .resizable(true)
-            .default_width(250.0)
-            .show_animated(ctx, (self.showing_collections || self.showing_files) && !self.focus_mode, |ui| {
-                if self.showing_collections {
-                    ui.horizontal(|ui| {
-                        ui.heading("📂 Colecciones");
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if components::secondary_button(ui, "🔄").clicked() { 
-                                self.refresh_collections(); 
-                            }
-                        });
+
+        let showing_left = (self.showing_collections || self.showing_files) && !self.focus_mode;
+
+        if showing_left && self.showing_collections {
+            egui::SidePanel::left("left_tag_rail")
+                .resizable(false)
+                .default_width(56.0)
+                .frame(
+                    egui::Frame::none()
+                        .fill(if self.config.dark_mode {
+                            egui::Color32::from_rgb(20, 20, 19)
+                        } else {
+                            egui::Color32::from_rgb(236, 234, 231)
+                        })
+                        .inner_margin(egui::Margin::symmetric(0.0, 12.0)),
+                )
+                .show(ctx, |ui| {
+                    let tokens = theme::tokens_from_ui(ui);
+                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(2.0);
+                        ui.add(
+                            egui::Image::new(egui::include_image!("../logo.svg"))
+                                .max_height(22.0),
+                        )
+                        .on_hover_text("Interstellar Writer");
+                        ui.add_space(8.0);
+
+                        ui.painter().line_segment(
+                            [
+                                egui::pos2(ui.min_rect().center().x - 16.0, ui.cursor().top()),
+                                egui::pos2(ui.min_rect().center().x + 16.0, ui.cursor().top()),
+                            ],
+                            egui::Stroke::new(1.0, tokens.divider),
+                        );
+                        ui.add_space(10.0);
                     });
-                    egui::ScrollArea::vertical().id_salt("col_scroll").show(ui, |ui| {
+
+                    let collection_abbrev = |name: &str| -> &'static str {
+                        match name {
+                            "blog" => "B",
+                            "docs" => "D",
+                            "projects" => "P",
+                            "app-landings" => "A",
+                            _ => "•",
+                        }
+                    };
+
+                    ui.vertical_centered(|ui| {
                         for collection in &collections {
-                            if ui.selectable_label(self.selected_collection.as_ref() == Some(collection), collection).clicked() {
+                            let selected = self.selected_collection.as_ref() == Some(collection);
+                            let bg = if selected {
+                                tokens.subtle_bg
+                            } else {
+                                egui::Color32::TRANSPARENT
+                            };
+                            let fg = if selected { tokens.text_primary } else { tokens.text_faint };
+
+                            let button = egui::Button::new(
+                                egui::RichText::new(collection_abbrev(collection))
+                                    .size(14.0)
+                                    .strong()
+                                    .color(fg),
+                            )
+                            .fill(bg)
+                            .rounding(tokens.radius_md);
+
+                            if ui
+                                .add_sized([36.0, 36.0], button)
+                                .on_hover_text(collection)
+                                .clicked()
+                            {
                                 self.selected_collection = Some(collection.clone());
                                 should_refresh_files = true;
                                 should_refresh_tags = true;
@@ -1152,49 +1282,176 @@ impl eframe::App for InterstellarApp {
                             }
                         }
                     });
-                    ui.separator();
-                }
 
-                if self.showing_files && self.selected_collection.is_some() {
-                    let coll = self.selected_collection.clone().unwrap();
-                    ui.horizontal(|ui| {
-                        ui.heading(format!("📄 {}", coll));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if components::primary_button(ui, "➕").clicked() { 
-                                self.showing_new_file_dialog = true; 
-                            }
-                        });
-                    });
-                    // Filtro de búsqueda
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.file_filter)
-                                .hint_text("🔍 Filtrar…")
-                                .desired_width(ui.available_width() - 30.0),
-                        );
-                        if !self.file_filter.is_empty() && components::secondary_button(ui, "✕").clicked() {
-                            self.file_filter.clear();
+                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                        let button = egui::Button::new(
+                            egui::RichText::new("R")
+                                .size(14.0)
+                                .color(tokens.text_faint),
+                        )
+                        .fill(egui::Color32::TRANSPARENT)
+                        .rounding(tokens.radius_md);
+
+                        if ui.add_sized([36.0, 36.0], button).clicked() {
+                            self.refresh_collections();
                         }
                     });
+                });
+
+            egui::SidePanel::left("left_divider_rail")
+                .resizable(false)
+                .default_width(1.0)
+                .frame(egui::Frame::none().fill(if self.config.dark_mode {
+                    egui::Color32::from_rgb(37, 35, 32)
+                } else {
+                    egui::Color32::from_rgb(221, 217, 213)
+                }))
+                .show(ctx, |_| {});
+        }
+
+        if showing_left && self.showing_files && self.selected_collection.is_some() {
+            let file_key = self.selected_file.as_deref().unwrap_or("");
+            egui::SidePanel::left(egui::Id::new(("left_file_list", file_key)))
+                .resizable(false)
+                .default_width(300.0)
+                .frame(
+                    egui::Frame::none()
+                        .fill(if self.config.dark_mode {
+                            egui::Color32::from_rgb(23, 23, 26)
+                        } else {
+                            egui::Color32::from_rgb(236, 234, 231)
+                        })
+                        .inner_margin(egui::Margin::symmetric(16.0, 16.0)),
+                )
+                .show(ctx, |ui| {
+                    let tokens = theme::tokens_from_ui(ui);
+                    let coll = self.selected_collection.clone().unwrap_or_default();
+
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(&coll)
+                                .italics()
+                                .size(20.0)
+                                .color(tokens.text_primary),
+                        );
+                        ui.add_space(ui.available_width() - 40.0);
+                        let plus = egui::Button::new(
+                            egui::RichText::new("+")
+                                .size(16.0)
+                                .color(tokens.text_faint),
+                        )
+                        .fill(egui::Color32::TRANSPARENT);
+                        if ui.add(plus).clicked() {
+                            self.showing_new_file_dialog = true;
+                        }
+                    });
+
+                    ui.add_space(10.0);
+
+                    egui::Frame::none()
+                        .fill(if self.config.dark_mode {
+                            egui::Color32::from_rgb(28, 27, 26)
+                        } else {
+                            egui::Color32::from_rgb(245, 243, 240)
+                        })
+                        .rounding(tokens.radius_sm)
+                        .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.file_filter)
+                                    .hint_text("Buscar…")
+                                    .desired_width(ui.available_width()),
+                            );
+                        });
+
+                    ui.add_space(10.0);
+
                     let filter_lc = self.file_filter.to_lowercase();
-                    let filtered: Vec<_> = files_list.iter()
+                    let filtered: Vec<_> = files_list
+                        .iter()
                         .filter(|f| {
                             filter_lc.is_empty()
                                 || f.title.to_lowercase().contains(&filter_lc)
                                 || f.name.to_lowercase().contains(&filter_lc)
                         })
                         .collect();
-                    egui::ScrollArea::vertical().id_salt("file_scroll").show(ui, |ui| {
-                        for entry in filtered {
-                            let icon = if entry.draft { "🔒" } else { "✅" };
-                            let label = format!("{} {}", icon, entry.title);
-                            if ui.selectable_label(self.selected_file.as_ref() == Some(&entry.name), label).clicked() {
-                                file_to_load = Some(entry.name.clone());
+
+                    egui::ScrollArea::vertical()
+                        .id_salt("file_scroll_v3")
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(0.0, 8.0);
+
+                            for entry in filtered {
+                                let selected = self.selected_file.as_ref() == Some(&entry.name);
+                                let rect_height = 56.0;
+                                let (rect, response) = ui.allocate_exact_size(
+                                    egui::vec2(ui.available_width(), rect_height),
+                                    egui::Sense::click(),
+                                );
+
+                                let bg = if selected {
+                                    tokens.subtle_bg
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                };
+                                ui.painter()
+                                    .rect_filled(rect, tokens.radius_md, bg);
+
+                                let content_rect =
+                                    rect.shrink2(egui::vec2(12.0, 10.0));
+                                let mut row_ui = ui.child_ui(
+                                    content_rect,
+                                    egui::Layout::top_down(egui::Align::Min),
+                                    None,
+                                );
+
+                                let title_color = if selected {
+                                    tokens.text_primary
+                                } else {
+                                    tokens.text_muted
+                                };
+
+                                row_ui.label(
+                                    egui::RichText::new(&entry.title)
+                                        .italics()
+                                        .color(title_color),
+                                );
+
+                                row_ui.add_space(2.0);
+
+                                row_ui.horizontal(|ui| {
+                                    let status_text = if entry.draft { "borrador" } else { "publicado" };
+                                    let status_color = if entry.draft { tokens.status_draft } else { tokens.status_published };
+                                    ui.label(
+                                        egui::RichText::new(status_text)
+                                            .small()
+                                            .color(status_color),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new("·")
+                                            .small()
+                                            .color(tokens.text_faint),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(&entry.date)
+                                            .small()
+                                            .color(tokens.text_faint),
+                                    );
+                                });
+
+                                if response.clicked() {
+                                    file_to_load = Some(entry.name.clone());
+                                }
                             }
-                        }
-                    });
-                }
-            });
+                        });
+
+                    let rect = ui.max_rect();
+                    ui.painter().line_segment(
+                        [egui::pos2(rect.right(), rect.top()), egui::pos2(rect.right(), rect.bottom())],
+                        egui::Stroke::new(1.0, tokens.divider),
+                    );
+                });
+        }
 
         if should_refresh_files {
             self.refresh_files();
@@ -1217,7 +1474,15 @@ impl eframe::App for InterstellarApp {
 
         egui::SidePanel::right("right_metadata")
             .resizable(true)
-            .default_width(300.0)
+            .default_width(280.0)
+            .min_width(0.0)
+            .frame(egui::Frame::none()
+                .fill(if self.config.dark_mode {
+                    egui::Color32::from_rgb(23, 23, 26)
+                } else {
+                    egui::Color32::from_rgb(236, 234, 231)
+                })
+                .inner_margin(egui::Margin::symmetric(8.0, 8.0)))
             .show_animated(ctx, self.showing_metadata && self.selected_file.is_some() && !self.focus_mode, |ui| {
                 let tokens = theme::tokens_from_ui(ui);
                 ui.horizontal(|ui| {
@@ -1470,19 +1735,21 @@ impl eframe::App for InterstellarApp {
         // --- PANEL CENTRAL ---
         egui::CentralPanel::default().show(ctx, |ui| {
             if self.selected_file.is_some() {
-                // Barra de herramientas
+                // Toolbar (hidden by default, toggled via ▼/▲)
                 let is_md = self.selected_file.as_ref().map_or(false, |f| f.ends_with(".md"));
-                let actions = toolbar::show_toolbar(ui, is_md, &mut self.showing_markdown_mode, self.focus_mode);
+                let actions = toolbar::show_toolbar(ui, is_md, &mut self.showing_markdown_mode, self.focus_mode, self.showing_toolbar);
                 
-                // Procesar acciones de la toolbar
+                // Process toolbar actions
+                if actions.toggle_toolbar { self.showing_toolbar = !self.showing_toolbar; }
                 if actions.toggle_focus_mode { self.focus_mode = !self.focus_mode; }
                 if actions.convert_to_mdx { self.rename_to_mdx(); }
                 if actions.insert_h1 { self.insert_at_cursor("\n\n# "); }
                 if actions.insert_h2 { self.insert_at_cursor("\n\n## "); }
                 if actions.insert_h3 { self.insert_at_cursor("\n\n### "); }
-                if actions.insert_bold { self.apply_format("**", "**"); }
-                if actions.insert_italic { self.apply_format("*", "*"); }
-                if actions.insert_link { self.apply_format("[", "](url)"); }
+                if actions.insert_bold { self.pending_toolbar_action = Some(("**".to_string(), "**".to_string())); }
+                else if actions.insert_italic { self.pending_toolbar_action = Some(("*".to_string(), "*".to_string())); }
+                else if actions.insert_link { self.pending_toolbar_action = Some(("[".to_string(), "](url)".to_string())); }
+                else { self.pending_toolbar_action = None; }
                 if actions.insert_color { self.insert_replacement("<span style={{color: '#e74c3c'}}>\n", "\n</span>"); }
                 if actions.insert_image { self.handle_image_insertion(); }
                 if actions.insert_table { self.insert_at_cursor("\n\n| Columna 1 | Columna 2 |\n| :--- | :--- |\n| Dato 1 | Dato 2 |\n\n"); }
@@ -1502,12 +1769,21 @@ impl eframe::App for InterstellarApp {
                 if actions.insert_notice_danger { self.insert_notice("danger", "Peligro"); }
                 if actions.insert_notice_success { self.insert_notice("success", "Éxito"); }
 
-                ui.separator();
+                // Subtle divider between toolbar and editor
+                {
+                    let tokens = theme::tokens_from_ui(ui);
+                    let rect = ui.available_rect_before_wrap();
+                    let y = rect.top();
+                    ui.painter().line_segment(
+                        [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+                        egui::Stroke::new(0.5, tokens.divider),
+                    );
+                    ui.add_space(1.0);
+                }
                 
                 egui::ScrollArea::vertical().id_salt("editor_scroll").show(ui, |ui| {
-                    let h_margin = if self.focus_mode { 120.0 } else { 30.0 };
                     egui::Frame::none()
-                        .inner_margin(egui::Margin::symmetric(h_margin, 20.0))
+                        .inner_margin(egui::Margin::symmetric(0.0, 0.0))
                         .show(ui, |ui| {
                             if self.showing_markdown_mode {
                                 preview::render_body_preview(ui, &self.body, &mut self.commonmark_cache);
@@ -1517,13 +1793,30 @@ impl eframe::App for InterstellarApp {
                             }
                         });
                 });
+                
+                // Procesar acción pendiente de toolbar AHORA que selection está actualizado
+                if let Some((prefix, suffix)) = self.pending_toolbar_action.take() {
+                    self.apply_format(&prefix, &suffix);
+                }
             } else {
                 ui.centered_and_justified(|ui| {
                     if self.config.repo_path.is_none() {
+                        let tokens = theme::tokens_from_ui(ui);
                         ui.vertical_centered(|ui| {
-                            ui.heading("Bienvenido a Interstellar Writer");
-                            ui.label("Para empezar, selecciona tu repositorio de Astro.");
-                            if ui.button("📁 Seleccionar Carpeta del Proyecto").clicked() {
+                            ui.add_space(ui.available_height() * 0.25);
+                            ui.label(
+                                egui::RichText::new("Welcome to Interstellar Writer")
+                                    .font(egui::FontId::proportional(28.0))
+                                    .color(tokens.text_primary),
+                            );
+                            ui.add_space(8.0);
+                            ui.label(
+                                egui::RichText::new("Select your Astro project to get started.")
+                                    .font(egui::FontId::proportional(14.0))
+                                    .color(tokens.text_muted),
+                            );
+                            ui.add_space(24.0);
+                            if components::primary_button(ui, "Open Project Folder").clicked() {
                                 if let Some(path) = utils::pick_folder() {
                                     self.set_repo_path(path);
                                     self.config.save();
@@ -1554,7 +1847,15 @@ impl eframe::App for InterstellarApp {
                             dashboard::DashboardAction::None => {},
                         }
                     } else {
-                        ui.label("Selecciona una colección en el panel izquierdo para ver tus publicaciones.");
+                        let tokens = theme::tokens_from_ui(ui);
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(ui.available_height() * 0.3);
+                            ui.label(
+                                egui::RichText::new("Select a collection from the left panel")
+                                    .font(egui::FontId::proportional(16.0))
+                                    .color(tokens.text_muted),
+                            );
+                        });
                     }
                 });
             }

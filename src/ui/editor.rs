@@ -1,102 +1,116 @@
-//! Editor de texto principal.
+//! Main text editor — clean centered writing area.
 
 use eframe::egui;
+use crate::ui::theme;
 
-/// Renderiza el editor de texto con resaltado de sintaxis.
+/// Render the text editor with syntax highlighting and centered layout.
 pub fn show_editor(
     ui: &mut egui::Ui,
     body: &mut String,
     selection: &mut Option<(usize, usize)>,
     pending_selection: &mut Option<(usize, usize)>,
 ) -> bool {
-    let output = ui.add_sized(
-        [ui.available_width(), ui.available_height().max(600.0)],
-        egui::TextEdit::multiline(body)
-            .font(egui::TextStyle::Monospace)
-            .desired_width(f32::INFINITY)
-            .layouter(&mut |ui, text, wrap_width| {
-                let mut layout_job = egui::text::LayoutJob::default();
-                layout_job.wrap.max_width = wrap_width;
+    let tokens = theme::tokens_from_ui(ui);
 
-                let font_id = egui::TextStyle::Monospace.resolve(ui.style());
-                let default_color = ui.visuals().text_color();
+    // Center the text column at ~640px max width
+    let available = ui.available_width();
+    let max_col: f32 = 640.0;
+    let col_width = max_col.min((available - 40.0).max(0.0));
 
-                for line in text.lines() {
-                    let dark_mode = ui.visuals().dark_mode;
-                    let format = if line.starts_with("#") {
-                        egui::TextFormat {
-                            font_id: egui::FontId::proportional(font_id.size * 1.1),
-                            // Dark: azul claro brillante visible sobre fondo oscuro y sobre selección.
-                            // Light: azul más saturado para contraste sobre fondo blanco.
-                            color: if dark_mode {
-                                egui::Color32::from_rgb(100, 180, 255)
+    // Add top padding for breathing room
+    ui.add_space(56.0);
+
+    let output = ui
+        .with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+            egui::TextEdit::multiline(body)
+                .font(egui::TextStyle::Body)
+                .desired_width(col_width)
+                .layouter(&mut |ui, text, wrap_width| {
+                    let mut layout_job = egui::text::LayoutJob::default();
+                    layout_job.wrap.max_width = wrap_width;
+
+                    let font_id = egui::TextStyle::Body.resolve(ui.style());
+                    let default_color = tokens.text_body;
+
+                    let parts: Vec<&str> = text.split('\n').collect();
+                    for (i, part) in parts.iter().enumerate() {
+                        let line = part.trim_end_matches('\r');
+                        let dark_mode = ui.visuals().dark_mode;
+                        let format = if line.starts_with("#") {
+                            egui::TextFormat {
+                                font_id: egui::FontId::proportional(font_id.size * 1.15),
+                                color: tokens.text_primary,
+                                ..Default::default()
+                            }
+                        } else if line.starts_with("import") || line.starts_with("---") {
+                            egui::TextFormat {
+                                color: tokens.text_faint,
+                                font_id: font_id.clone(),
+                                ..Default::default()
+                            }
+                        } else if line.trim().starts_with("<Notice") {
+                            let color = if line.contains("type=\"danger\"") {
+                                tokens.brand_danger
+                            } else if line.contains("type=\"warning\"") {
+                                tokens.brand_warning
+                            } else if line.contains("type=\"success\"") {
+                                tokens.brand_success
+                            } else if line.contains("type=\"tip\"") {
+                                egui::Color32::from_rgb(155, 89, 182)
                             } else {
-                                egui::Color32::from_rgb(0, 80, 180)
-                            },
-                            ..Default::default()
-                        }
-                    } else if line.starts_with("import") || line.starts_with("---") {
-                        egui::TextFormat {
-                            color: egui::Color32::from_gray(120),
-                            font_id: font_id.clone(),
-                            ..Default::default()
-                        }
-                    } else if line.trim().starts_with("<Notice") {
-                        let color = if line.contains("type=\"danger\"") {
-                            egui::Color32::from_rgb(231, 76, 60)
-                        } else if line.contains("type=\"warning\"") {
-                            egui::Color32::from_rgb(241, 196, 15)
-                        } else if line.contains("type=\"success\"") {
-                            egui::Color32::from_rgb(46, 204, 113)
-                        } else if line.contains("type=\"tip\"") {
-                            egui::Color32::from_rgb(155, 89, 182)
+                                tokens.brand_primary
+                            };
+                            egui::TextFormat {
+                                color,
+                                font_id: font_id.clone(),
+                                ..Default::default()
+                            }
+                        } else if line.trim().starts_with("<") {
+                            egui::TextFormat {
+                                color: if dark_mode {
+                                    egui::Color32::from_rgb(154, 149, 144)
+                                } else {
+                                    egui::Color32::from_rgb(74, 69, 64)
+                                },
+                                font_id: font_id.clone(),
+                                ..Default::default()
+                            }
                         } else {
-                            egui::Color32::from_rgb(52, 152, 219)
+                            egui::TextFormat {
+                                color: default_color,
+                                font_id: font_id.clone(),
+                                ..Default::default()
+                            }
                         };
-                        egui::TextFormat {
-                            color,
-                            font_id: font_id.clone(),
-                            ..Default::default()
+                        layout_job.append(line, 0.0, format);
+                        if i < parts.len() - 1 {
+                            layout_job.append("\n", 0.0, egui::TextFormat::default());
                         }
-                    } else if line.trim().starts_with("<") {
-                        egui::TextFormat {
-                            color: egui::Color32::from_rgb(155, 89, 182),
-                            font_id: font_id.clone(),
-                            ..Default::default()
-                        }
-                    } else {
-                        egui::TextFormat {
-                            color: default_color,
-                            font_id: font_id.clone(),
-                            ..Default::default()
-                        }
-                    };
-                    layout_job.append(line, 0.0, format);
-                    layout_job.append("\n", 0.0, egui::TextFormat::default());
-                }
+                    }
 
-                ui.fonts(|f| f.layout_job(layout_job))
-            })
-            .lock_focus(true),
-    );
+                    ui.fonts(|f| f.layout_job(layout_job))
+                })
+                .lock_focus(true)
+                .show(ui)
+        })
+        .inner;
 
-    // Si tenemos una selección pendiente (programática), la aplicamos
+    // Apply pending programmatic selection
     if let Some((start, end)) = pending_selection.take() {
-        let mut state =
-            egui::text_edit::TextEditState::load(ui.ctx(), output.id).unwrap_or_default();
+        let mut state = output.state.clone();
         let c_start = egui::text::CCursor::new(start);
         let c_end = egui::text::CCursor::new(end);
         state
             .cursor
             .set_char_range(Some(egui::text::CCursorRange::two(c_start, c_end)));
-        state.store(ui.ctx(), output.id);
+        state.store(ui.ctx(), output.response.id);
+        *selection = Some((start, end));
+        return output.response.changed();
     }
 
-    // Sincronizar selection con el estado real del editor
-    if let Some(state) = egui::TextEdit::load_state(ui.ctx(), output.id) {
-        if let Some(range) = state.cursor.char_range() {
-            *selection = Some((range.primary.index, range.secondary.index));
-        }
+    // Sync selection with actual editor state
+    if let Some(cursor_range) = output.state.cursor.char_range() {
+        *selection = Some((cursor_range.primary.index, cursor_range.secondary.index));
     }
-    output.changed()
+    output.response.changed()
 }

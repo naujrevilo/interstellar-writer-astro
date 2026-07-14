@@ -1,6 +1,5 @@
 # Rust
 target/
-Cargo.lock
 **/*.rs.bk
 *.pdb
 
@@ -71,3 +70,10 @@ build/
 *.bak
 *.backup
 *~
+conn.ps1
+
+# Configuración local de herramientas de agentes IA
+.atl/
+.openclaw/
+.windsurf/
+.openspec/
